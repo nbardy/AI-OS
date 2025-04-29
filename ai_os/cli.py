@@ -1,175 +1,202 @@
 import cmd
-import sys
 from typing import List
 from pathlib import Path
 from rich.console import Console
 from rich.text import Text
-from rich.table import Table
+# rich.table.Table is no longer used here
+# rich.tree.Tree is no longer used here
 
 # Import the global context_manager instance
 from ai_os.utils.context import context_manager
 # Import commands which now operate on the context_manager
 from ai_os.core import commands
 
-console = Console()
+# Import the Textual Context Editor App
+from ai_os.ui.context_editor import ContextEditorApp
+
+# KnownFileData is no longer needed here
+
+console = Console() # Keep Rich Console for the cmd.Cmd shell output
+
+# --- Textual Context Editor App code is now removed ---
 
 class AIOSShell(cmd.Cmd):
     intro = 'Welcome to AI-OS. Type /help or ? to list commands.\n'
-    prompt = '➜ ' # AI-OS git:(main) ✗' # Simulate prompt style
+    prompt = '➜ '
 
-    # Alias mappings - keeping minimal for now
     aliases = {
         '>': 'chat',
-        # Add others later: '+', '!', '@'
     }
 
     def precmd(self, line):
-        if line.startswith('/'):
-            parts = line[1:].split(maxsplit=1)
-            cmd_name = parts[0]
-            arg_str = parts[1] if len(parts) > 1 else ''
+        """Parse aliases and slash commands."""
+        line = line.strip()
+        if not line:
+            return ""  # Handle empty line
 
-            if cmd_name in self.aliases:
-                cmd_name = self.aliases[cmd_name]
+        parts = line.split(maxsplit=1)
+        first_part = parts[0]
+        arg_str = parts[1] if len(parts) > 1 else ''
 
+        # Check for aliases first (e.g., '>')
+        if first_part in self.aliases:
+            cmd_name = self.aliases[first_part]
+            # arg_str is already defined above
             return f"{cmd_name} {arg_str}".strip()
-        
-        if line.strip():
-            console.print(f"Unknown command format: '{line}'. Commands must start with '/'.")
-            return ""
 
-        return line
+        # If not an alias, check for explicit slash command (e.g., '/chat')
+        # arg_str is already defined above
+        if line.startswith('/'):
+            return f"{first_part[1:]} {arg_str}".strip()  # Strip the '/'
+
+        # Anything else is an unknown format unless it's meant for the default handler
+        # If default should handle raw input, maybe don't print error here?
+        # For now, assume commands MUST start with / or alias
+        console.print(f"Unknown command format: '{line}'. Commands must start with '/' or use an alias ({', '.join(f'/{k}' for k in self.aliases.keys())}).")
+        return "" # Prevent default handler execution for invalid format
 
     def default(self, line):
-        pass
+        """Handles unrecognized commands."""
+        # This is called if precmd returns a non-empty string that doesn't match a do_* method
+        # Because precmd now returns "" for invalid formats, this shouldn't be hit often
+        # unless precmd logic changes or a valid command format (like /unknown) is used.
+        console.print(f"Unknown command: '{line}'. Type /help for available commands.")
+
 
     def do_help(self, arg):
-        """List available commands or get help on a specific command."""
+        """/help [cmd] : List commands or show help for a specific command."""
         if arg:
             try:
-                resolved_arg = self.aliases.get(arg, arg)
+                # Resolve alias if the user asks for help on an alias
+                resolved_arg = self.aliases.get(arg.lstrip('/'), arg.lstrip('/'))
                 func = getattr(self, 'do_' + resolved_arg, None)
                 if func and func.__doc__:
-                    console.print(func.__doc__.strip())
+                    # Display command usage from docstring
+                    doc_lines = func.__doc__.strip().split('\n')
+                    usage = doc_lines[0] # First line is usually usage summary
+                    console.print(f"[bold]Usage:[/bold] {usage}")
+                    if len(doc_lines) > 1:
+                         # Print the rest of the docstring as description
+                         console.print("\n".join(line.strip() for line in doc_lines[1:]))
                     return
             except AttributeError:
-                pass
-            console.print(f"No help for command or alias '{arg}'")
+                pass # Fall through to "No help" message
+            console.print(f"No help available for command or alias: '{arg}'")
         else:
-            command_methods = [name[3:] for name in get_class_methods(self.__class__) if name.startswith('do_')]
-            valid_commands = sorted([cmd for cmd in command_methods if cmd not in ['help', 'quit']])
-
-            aliases_list = sorted([f"{alias} -> /{cmd}" for alias, cmd in self.aliases.items()])
+            # Dynamically get command methods, excluding internal/hidden ones
+            command_methods = [name[3:] for name in dir(self) if name.startswith('do_') and callable(getattr(self, name))]
+            # Exclude help, quit, exit, and any command that is only reachable via alias
+            aliased_cmds = set(self.aliases.values())
+            exclude_cmds = {'help', 'quit', 'exit'} # Don't list aliases directly as primary commands
+            # Primary commands are those with do_* methods not exclusively behind an alias
+            primary_commands = sorted([cmd for cmd in command_methods if cmd not in exclude_cmds and cmd not in aliased_cmds])
+            # Explicitly add help/exit/quit
+            system_commands = sorted([cmd for cmd in command_methods if cmd in exclude_cmds])
 
             console.print("[bold]Available commands:[/bold]")
-            console.print("  " + ", ".join([f"/{c}" for c in valid_commands] + ['/help', '/exit', '/quit']))
-            if aliases_list:
-                console.print("[bold]Aliases:[/bold]")
-                console.print("  " + ", ".join(aliases_list))
+            if primary_commands:
+                console.print("  " + ", ".join([f"/{c}" for c in primary_commands]))
+            if system_commands:
+                console.print("  " + ", ".join([f"/{c}" for c in system_commands]))
 
-    # --- Core Commands ---
+            if self.aliases:
+                console.print("\n[bold]Aliases:[/bold]")
+                # Show aliases like: '> (/chat)'
+                aliases_list = sorted([f"{alias} ({f'/{cmd}'}) " for alias, cmd in self.aliases.items()])
+                console.print("  " + ", ".join(aliases_list))
 
     def do_chat(self, arg):
         """/chat or > <prompt> : Chat with LLM, includes context."""
         if not arg:
-            console.print("Usage: /chat <prompt>")
+            console.print("[yellow]Usage: /chat <prompt>  or  > <prompt>[/yellow]")
             return
 
         console.print("[bold blue]assistant:[/bold blue] ", end="")
         try:
+            # Stream the response
+            full_response = ""
             for chunk in commands.chat(prompt=arg):
                 console.print(chunk, end="", sep="")
+                full_response += chunk
+            # Ensure a newline after the streaming is complete
+            console.print()
+            # Update message history explicitly after full response (context_manager handles this internally now?)
+            # No, chat command should add user and assistant messages
+            # Let's assume context_manager.add_message is called within commands.chat
         except Exception as e:
+            # Ensure newline even if error occurs mid-stream
             console.print(f"\n[bold red]Error during chat:[/bold red] {e}")
-        console.print()
+        # No need for extra console.print() if streaming handles final newline
 
     def do_context(self, arg):
-        """/context : Launch the context editor UI."""
-        console.print("[bold green]Entering Context Editor (type 'exit' to return)[/bold green]")
-
-        while True:
-            try:
-                files = context_manager.get_known_files()
-                paths = sorted(files.keys())
-
-                table = Table(title="Context Files")
-                table.add_column("#", style="dim")
-                table.add_column("Path", style="bold")
-                table.add_column("Include", justify="center")
-
-                if not files:
-                    table.add_row("", "No files added.", "[red]N/A[/red]")
-                else:
-                    for i, path in enumerate(paths):
-                        data = files[path]
-                        status_text = Text("ON", style="green bold") if data.include_in_prompt else Text("OFF", style="red bold")
-                        table.add_row(str(i+1), str(path), status_text)
-
-                console.print(table)
-                console.print("Toggle file by # or path. Type 'exit' to return.")
-
-                context_input = console.input("[bold cyan]Context Editor[/bold cyan] > ").strip()
-
-                if context_input.lower() == "exit":
-                    console.print("[bold green]Exiting Context Editor[/bold green]")
-                    break
-
-                if context_input.lower().startswith("toggle "):
-                    toggle_arg = context_input[7:].strip()
-                    if not toggle_arg:
-                        console.print("Usage: toggle <# or filepath>")
-                        continue
-
-                    try:
-                        idx = int(toggle_arg) - 1
-                        if 0 <= idx < len(paths):
-                            target_path = paths[idx]
-                            commands.toggle_context_file(str(target_path))
-                        else:
-                            console.print(f"Invalid number: {toggle_arg}")
-                    except ValueError:
-                        target_path = Path(toggle_arg)
-                        commands.toggle_context_file(str(target_path))
-                    except Exception as e:
-                        console.print(f"Error toggling {toggle_arg}: {e}")
-
-                else:
-                    console.print(f"Unknown command: '{context_input}'. Use 'toggle <# or filepath>' or 'exit'.")
-
-            except Exception as e:
-                console.print(f"[bold red]Error in Context Editor:[/bold red] {e}")
-
-    # --- Utility Commands ---
+        """/context : Launch the interactive context editor UI."""
+        app = ContextEditorApp()
+        app.run()
+        # Re-initialize console might not be necessary, but good practice if TUI messed with it.
+        # console = Console() # Re-create to ensure terminal state is okay? Maybe not needed.
+        console.print("\n[bold green]Returned to AI-OS shell.[/bold green]")
 
     def do_exit(self, arg):
-        """Exit the AI-OS shell."""
+        """/exit : Exit the AI-OS shell."""
         console.print("Exiting AI-OS. Goodbye!")
         return True
 
     def do_quit(self, arg):
-         """Exit the AI-OS shell."""
-         return self.do_exit(arg)
+        """/quit : Alias for /exit."""
+        return self.do_exit(arg)
 
-# --- Helper function for help command introspection ---
 def get_class_methods(cls):
+    # This helper is no longer used by do_help
     return [method_name for method_name in dir(cls) if callable(getattr(cls, method_name))]
 
-# --- Initialization ---
 def initialize_cli():
     """Initializes the CLI and context."""
     console.print("[bold green]Starting AI-OS Shell...[/bold green]")
+
+    # Print the quote
+    console.print("\n[bold italic yellow]“Abandon vibe coding—embrace AI engineering.”[/bold italic yellow]\n")
+
+    # Context initialization
     console.print("[bold green]Initializing context with git files...[/bold green]")
-
     files_added = context_manager.load_git_repo()
-
     if files_added:
         console.print(f"[bold green]Added {len(files_added)} files to context.[/bold green]")
     else:
-        console.print("[bold yellow]No git files added.[/bold yellow]")
+        console.print("[bold yellow]No git files found or added to context.[/bold yellow]")
 
-    console.print("[bold green]AI-OS Minimal Chat[/bold green]")
-    console.print("Type /help for commands. Type /context to manage files.")
-    AIOSShell().cmdloop()
+    # Instantiate the shell early to access commands/aliases
+    shell = AIOSShell()
 
-if __name__ == '__main__':
-    initialize_cli()
+    # --- Print available commands and aliases (adapted from do_help) ---
+    # Dynamically get command methods, excluding internal/hidden ones
+    command_methods = [name[3:] for name in dir(shell) if name.startswith('do_') and callable(getattr(shell, name))]
+    # Exclude help, quit, exit, and any command that is only reachable via alias
+    aliased_cmds = set(shell.aliases.values())
+    exclude_cmds = {'help', 'quit', 'exit'} # Don't list aliases directly as primary commands
+    # Primary commands are those with do_* methods not exclusively behind an alias
+    primary_commands = sorted([cmd for cmd in command_methods if cmd not in exclude_cmds and cmd not in aliased_cmds])
+    # Explicitly add help/exit/quit
+    system_commands = sorted([cmd for cmd in command_methods if cmd in exclude_cmds])
+
+    console.print("\n[bold green]AI-OS Shell Ready[/bold green]")
+
+    console.print("[bold]Available commands:[/bold]")
+    if primary_commands:
+        console.print("  " + ", ".join([f"/{c}" for c in primary_commands]))
+    if system_commands:
+        console.print("  " + ", ".join([f"/{c}" for c in system_commands]))
+
+    if shell.aliases:
+        console.print("\n[bold]Aliases:[/bold]")
+        # Show aliases like: '> (/chat)'
+        aliases_list = sorted([f"{alias} ({f'/{cmd}'}) " for alias, cmd in shell.aliases.items()])
+        console.print("  " + ", ".join(aliases_list))
+    # --- End command/alias printing ---
+
+    console.print("\nType /help for details on a command.")
+    # Use the existing shell instance
+    shell.cmdloop()
+
+# The main entry point should be managed elsewhere (e.g., in __main__.py or main.py)
+# if __name__ == '__main__':
+#    initialize_cli()
