@@ -20,8 +20,7 @@ We follow a shared minimal language (think CRDT-style primitives) to orchestrate
 | `/run`   | `!`   | Unix-style piping & safe shell exec    |
 | `/macro` | `@`   | Run a Python macro workflow            |
 
-> We share Unix philosophy—even Unix tooling—through string piping and `/run`:  
-> think small programs composed via clear, typed interfaces.
+> We embrace Unix philosophy—even Unix tooling—by enabling string piping and `/run` execution. This allows composing small programs via clear, typed interfaces.
 
 ---
 
