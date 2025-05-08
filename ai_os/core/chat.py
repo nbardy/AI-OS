@@ -3,7 +3,7 @@ import httpx
 from typing import List
 from .models import Message
 
-def chat_completion(messages: List[Message], model: str = "openai/gpt-4o"):
+def chat_completion(messages: List[Message], model: str = "google/gemini-2.5-flash-preview:thinking"):
     """Sends messages to OpenRouter API and yields response chunks."""
     api_key = os.environ.get("OPENROUTER_API_KEY")
     if not api_key:

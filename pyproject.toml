@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai_os"
+version = "0.1.0"
+description = "A description of your project"
+readme = "README.md"
+requires-python = ">=3.8"
+# Add your dependencies here, for example:
+# dependencies = [
+#     "requests",
+#     "numpy",
+# ]
+
+[project.urls]
+"Homepage" = "https://github.com/nbardy/ai_os" # Replace with your actual URL
+"Bug Tracker" = "https://github.com/nbardy/ai_os/issues" # Replace with your actual URL
+
+[tool.setuptools.packages.find]
+where = ["."]  # search in the root directory
+include = ["ai_os*"]  # include packages starting with ai_os
+exclude = ["tmp*"] # exclude directories like tmp 

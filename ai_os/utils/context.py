@@ -5,6 +5,23 @@ import subprocess
 
 from ai_os.core.models import Context, Message, KnownFileData
 
+
+request_format = """
+<CONTEXT START>
+Below if context  information to assist with the requests.
+All files are the current version
+Chat history refers to the conversation between the user and the assistant.
+
+[FILE CONTEXT]
+{file_context}
+[FILE CONTEXT END]
+
+[CHAT HISTORY]
+{chat_history}
+[CHAT HISTORY END]
+<CONTEXT END>
+"""
+
 class ContextManager:
     def __init__(self):
         self._context = Context()
@@ -40,41 +57,49 @@ class ContextManager:
                 try:
                     content = f.read_text()
                     self.add_known_file(path=f, content=content)
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[Warning] Could not read file {f} during git repo load: {e}")
             return files_to_add
         except (subprocess.CalledProcessError, FileNotFoundError):
             return []
 
     def get_llm_payload(self, user_prompt: str, include_history_count: int = 10) -> List[Message]:
-        payload_messages: List[Message] = []
-
+        # Gather file context
         file_context_content = ""
+        included_files_count = 0
         for path, data in self._context.known_files.items():
             if data.include_in_prompt:
                 file_context_content += f"## File: {str(path)}\n```\n{data.content}\n```\n\n"
+                included_files_count += 1
+        
+        if not included_files_count:
+            file_context_content = "No files included in context."
 
-        if file_context_content:
-            payload_messages.append(Message(role="system", content="[CONTEXT START]\n" + file_context_content.strip() + "\n[CONTEXT END]"))
+        # Gather chat history
+        chat_history_content = ""
+        # Ensure we only take the specified number of messages from the end
+        actual_history_count = int(include_history_count)
+        start_index = max(0, len(self._context.messages) - actual_history_count)
+        relevant_history = self._context.messages[start_index:]
 
-        chat_history_only = [
-            msg for msg in self._context.messages
-            if not msg.content.strip().startswith("[CONTEXT START]")
+        if relevant_history:
+            for msg in relevant_history:
+                # Simple representation for the context string
+                chat_history_content += f"{msg.role}: {msg.content}\n" 
+        else:
+            chat_history_content = "No chat history provided."
+
+        # Format the system message using the template
+        system_content = request_format.format(
+            file_context=file_context_content.strip(), 
+            chat_history=chat_history_content.strip()
+        )
+
+        # Construct the final payload
+        payload_messages = [
+            Message(role="system", content=system_content),
+            Message(role="user", content=user_prompt)
         ]
-
-        if chat_history_only:
-            history_before_current_prompt = chat_history_only[:-1]
-            payload_messages.extend(history_before_current_prompt[-include_history_count:])
-
-        if self._context.messages:
-            last_msg = self._context.messages[-1]
-            if last_msg.role == "user" and last_msg.content == user_prompt:
-                payload_messages.append(last_msg)
-            else:
-                payload_messages.append(Message(role="user", content=user_prompt))
-
-        if payload_messages and payload_messages[0].role == "assistant":
-            payload_messages.insert(0, Message(role="system", content="Continuing conversation."))
 
         return payload_messages
 
