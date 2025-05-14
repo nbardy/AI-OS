@@ -5,6 +5,8 @@ from ai_os.core.models import Patch
 from ai_os.core.chat import chat_completion
 from ai_os.utils.context import context_manager
 import re
+import os
+import uuid
 from typing import Dict, Tuple
 
 # ---------------------------------------------------------------------------
@@ -133,6 +135,22 @@ Goal: {plan}
         for chunk in chat_completion(messages=messages):
             full_llm_response += chunk
     console.print("[dim]LLM response received.[/dim]")
+
+    # --- Log input and output trace to ./tmp ---
+    try:
+        log_dir = "./tmp"
+        os.makedirs(log_dir, exist_ok=True)
+        trace_file_name = f"strategy_trace_{STRATEGY_NAME}_{uuid.uuid4()}.log"
+        trace_file_path = os.path.join(log_dir, trace_file_name)
+        with open(trace_file_path, "w") as f:
+            f.write("--- model input ---\n")
+            f.write(llm_prompt_content)
+            f.write("\n\n--- model output ---\n")
+            f.write("[Full model output is logged to a file in /tmp by the patch command.]\n")
+        # console.print(f"[dim]Strategy trace saved to: {trace_file_path}[/dim]") # Optional: print path to console
+    except Exception as e:
+        console.print(f"[yellow]Warning:[/yellow] Could not save strategy trace to {log_dir}: {e}")
+    # -------------------------------------------
 
     stripped = full_llm_response.strip()
     if stripped.startswith("```diff") or stripped.startswith("--- a/"):

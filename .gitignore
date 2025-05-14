@@ -1,1 +1,3 @@
 **/*.pyc
+tmp
+ai_os.egg-info/*

@@ -1,11 +1,11 @@
 # AI-OS 😊
 
-**“Abandon vibe coding—embrace AI engineering.”**
+**"Abandon vibe coding—embrace AI engineering."**
 
 AI-OS is an AI operating system—not a monolithic framework. Software is meant to be rewritten: AI-OS is a tiny core shell you fork, extend, and discard without regret.
 
 
-It’s the dawn of AI—let us rewrite our code faster, making it smaller, simpler, and less complex. Low-quality LLM code is optional noise; with disciplined workflows we generate **safe, tested, readable, well-factored** code—quality verifiable by any metric.
+It's the dawn of AI—let us rewrite our code faster, making it smaller, simpler, and less complex. Low-quality LLM code is optional noise; with disciplined workflows we generate **safe, tested, readable, well-factored** code—quality verifiable by any metric.
 
 Agents are for the common folk, macros are for the nerds.
 

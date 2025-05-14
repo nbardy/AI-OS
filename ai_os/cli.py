@@ -6,7 +6,8 @@ from rich.text import Text
 # rich.table.Table is no longer used here
 # rich.tree.Tree is no longer used here
 import subprocess # Add subprocess import
-
+import os # Needed for path completion
+from rich.prompt import Prompt # Needed for _ask_approval
 # Import the global context_manager instance
 from ai_os.utils.context import context_manager
 # Import commands which now operate on the context_manager
@@ -14,6 +15,7 @@ from ai_os.core import commands
 
 # Import the Textual Context Editor App
 from ai_os.ui.context_editor import ContextEditorApp
+from ai_os.core.macro_runner import MacroRunner # Import the runner
 
 # KnownFileData is no longer needed here
 
@@ -38,6 +40,7 @@ class AIOSShell(cmd.Cmd):
 
     def __init__(self):
         super().__init__()
+        self.console = console
         self.command_history: List[str] = []
         self.history_file_path = Path.home() / ".ai_os" / "history.txt"
         self._load_history()
@@ -82,11 +85,19 @@ class AIOSShell(cmd.Cmd):
             arg_str = parts[1] if len(parts) > 1 else ''
         elif line and line[0] in self.aliases: # Ensure line is not empty after strip
             cmd_name = self.aliases[line[0]]
-            arg_str = line[1:].lstrip() # Get everything after the alias char
+            arg_str_after_alias_char = line[1:].lstrip() 
+            # If the arguments after the alias character themselves start with the command name
+            # (e.g. user types "@macro actual_path.py" where "@" is alias for "macro"),
+            # then the actual arguments for the command should be what follows that redundant command name.
+            parts_of_arg_str = arg_str_after_alias_char.split(maxsplit=1)
+            if len(parts_of_arg_str) > 1 and parts_of_arg_str[0] == cmd_name:
+                arg_str = parts_of_arg_str[1]
+            else:
+                arg_str = arg_str_after_alias_char
         else:
             # Handles inputs that don't start with / or a known alias
             parts = line.split(maxsplit=1)
-            first_part = parts[0] if parts else line # Handle case where line is just empty spaces after strip (though already handled by !line check)
+            first_part = parts[0] if parts else line
             console.print(f"[yellow]Command '{first_part}' not recognized.[/yellow] Commands must start with a slash '/' or an alias ({', '.join(f'{k} (/{v})' for k, v in self.aliases.items())}). For general chat, use `/chat` or `>`. Type `/help` for a list of commands.")
             return "" # Invalid format, prevent execution
 
@@ -150,20 +161,22 @@ class AIOSShell(cmd.Cmd):
         console.print("[bold blue]assistant:[/bold blue] ", end="")
         try:
             # Stream the response with a thinking spinner
-            full_response = ""
+            full_response = "" # Keep track of full response for potential error logging if needed
             with console.status("Thinking...", spinner="dots"):
+                # commands.chat yields chunks and handles context update internally
                 for chunk in commands.chat(prompt=arg):
+                    # Ensure each chunk is flushed immediately to avoid buffering issues
+                    # interfering with the final output display before the prompt redraws.
+                    # print("chunk >", chunk, "<")
                     console.print(chunk, end="", sep="")
-                    full_response += chunk
+                    full_response += chunk # Still useful to have the full response locally if needed later
             # Ensure a newline after the streaming is complete
             console.print()
-            # Update message history explicitly after full response (context_manager handles this internally now?)
-            # No, chat command should add user and assistant messages
-            # Let's assume context_manager.add_message is called within commands.chat
         except Exception as e:
             # Ensure newline even if error occurs mid-stream
+            console.print() # Add newline in case of error too
             console.print(f"\n[bold red]Error during chat:[/bold red] {e}")
-        # No need for extra console.print() if streaming handles final newline
+            # Log the partial response if available? Maybe not necessary as context should have user msg.
 
     def do_context(self, arg):
         """/context : Launch the interactive context editor UI."""
@@ -208,6 +221,91 @@ class AIOSShell(cmd.Cmd):
         except Exception as e:
             console.print(f"[bold red]An unexpected error occurred while trying to run the command:[/bold red] {e}")
 
+    def do_macro(self, arg):
+        """/macro <path/to/macro.py> [key=value ...] : Run a macro script."""
+        if not arg:
+            self.console.print("[yellow]Usage: /macro <path/to/macro.py> [key=value ...][/yellow]")
+            return
+
+        runner = MacroRunner(self.console, self)
+        try:
+            runner.run(arg)
+        except Exception as e:
+            self.console.print(f"[bold red]An error occurred while trying to run the macro: {e}[/bold red]")
+
+    def complete_macro(self, text, line, begidx, endidx):
+        """Completes macro paths and filenames."""
+        arg_line = line[line.find('do_macro') + len('do_macro '):begidx]
+
+        last_space_index = arg_line.rfind(' ')
+        current_arg_prefix = arg_line[last_space_index + 1:]
+
+        if '=' in current_arg_prefix:
+            return []
+
+        if '/' in current_arg_prefix:
+            dirname, prefix = os.path.split(current_arg_prefix)
+            search_path = Path(dirname)
+        else:
+            search_path = Path('.')
+            prefix = current_arg_prefix
+
+        completions = []
+        try:
+            for item in os.listdir(search_path):
+                item_path = search_path / item
+                item_name = item_path.name
+
+                if item_name.startswith(prefix):
+                    if item_path.is_dir():
+                        completions.append(item_name + '/')
+                    elif item_path.suffix == '.py':
+                        completions.append(item_name)
+
+            if not '/' in current_arg_prefix and ('examples'.startswith(prefix) or prefix == ''):
+                 if Path('examples/').is_dir():
+                      completions.append('examples/')
+
+        except FileNotFoundError:
+            return []
+        except Exception as e:
+            self.console.print(f"[yellow]Error during macro path completion: {e}[/yellow]", highlight=False)
+            return []
+
+        return sorted(completions)
+
+    def _ask_approval(self, msg: str) -> bool:
+        """Internal method called by macro_runner to ask the user for Y/N approval."""
+        try:
+             return Prompt.ask(f"[bold cyan]Macro asks:[/bold cyan] {msg}\nApprove? (y/N)", console=self.console, choices=["y", "n"], default="n").lower() == 'y'
+        except EOFError:
+             self.console.print("[yellow]Input stream closed during approval prompt. Denying approval.[/yellow]")
+             return False
+        except Exception as e:
+             self.console.print(f"[bold red]Error during approval prompt: {e}. Denying approval.[/bold red]")
+             return False
+
+    def _run_patch_workflow(self, plan: str, user_approval: bool = True) -> dict | None:
+        """Internal method called by macro_runner or macro_helpers.patch to execute the patch workflow."""
+        if not plan:
+             self.console.print("[yellow]Patch workflow requires a plan.[/yellow]")
+             return None
+        try:
+            # commands.patch needs to accept user_approval_override and return the result dict
+            patch_result = commands.patch(
+                plan=plan,
+                strategy_name=self.default_patch_strategy, # Use CLI's default strategy
+                console=self.console,
+                user_approval_override=user_approval # Pass the flag down
+            )
+            return patch_result # Return the result from commands.patch
+        except Exception as e:
+             self.console.print(f"[bold red]A critical error occurred during the patch workflow:[/bold red] {e}")
+
+    @property
+    def context_manager(self):
+        return context_manager
+
     def do_patch(self, arg):
         """/patch [strategy] <plan> : Generate, preview, and apply a code patch.
 
@@ -221,48 +319,31 @@ class AIOSShell(cmd.Cmd):
         parts = arg.strip().split(maxsplit=1)
         strategy_name = self.default_patch_strategy
         plan = ""
-
         if not parts:
-             console.print(f"[yellow]Usage: /patch [strategy_name] <plan>[/yellow]")
-             console.print(f"[yellow]Default strategy: '{self.default_patch_strategy}'. Available: {list(commands.PATCH_STRATEGIES.keys())}[/yellow]") # Need access to strategies here
-             return
-
-        # Check if the first part looks like a strategy name
-        # A simple heuristic: check if it's a known strategy name.
-        # This allows "/patch plan..." or "/patch strategy_name plan..."
-        first_part = parts[0]
-        if first_part in commands.PATCH_STRATEGIES: # Check against the imported registry
-             strategy_name = first_part
-             plan = parts[1] if len(parts) > 1 else ""
-        else:
-             # Assume the entire arg is the plan, use the default strategy
-             plan = arg.strip()
-             strategy_name = self.default_patch_strategy
-
-
-        if not plan:
-            console.print(f"[yellow]Usage: /patch [strategy_name] <plan>[/yellow]")
-            console.print(f"[yellow]Please provide a plan.[/yellow]")
+            self.console.print(f"[yellow]Usage: /patch [strategy_name] <plan>[/yellow]")
+            self.console.print(f"[yellow]Default strategy: '{self.default_patch_strategy}'. Available: {list(commands.PATCH_STRATEGIES.keys())}[/yellow]")
             return
-
-
-        console.print(f"[dim]Using strategy: '{strategy_name}'[/dim]")
+        first_part = parts[0]
+        if first_part in commands.PATCH_STRATEGIES:
+            strategy_name = first_part
+            plan = parts[1] if len(parts) > 1 else ""
+        else:
+            plan = arg.strip()
+            strategy_name = self.default_patch_strategy
+        if not plan:
+            self.console.print(f"[yellow]Usage: /patch [strategy_name] <plan>[/yellow]")
+            self.console.print(f"[yellow]Please provide a plan.[/yellow]")
+            return
+        self.console.print(f"[dim]Using strategy: '{strategy_name}'[/dim]")
         try:
-            # Call the orchestrator function in commands.py
-            # Pass the console instance and the determined strategy name
-            # commands.patch returns True/False indicating workflow success/failure (applied or rejected vs error)
-            commands.patch(plan=plan, strategy_name=strategy_name, console=console)
-            # Success/failure messages and logging are handled inside commands.patch/apply_patch_with_approval.
-            # We don't need to print success/failure here unless commands.patch didn't already do it.
+            # Call the internal workflow method, CLI always asks for approval
+            self._run_patch_workflow(plan=plan, user_approval=True)
 
         except Exception as e:
-            # Catch any *unexpected* errors that bubble up from the commands module
-            # Specific operational errors (git, parsing, unimplemented strategy)
-            # should ideally be caught and logged within commands.patch.
-            # This catches truly unhandled exceptions.
-            console.print(f"\n[bold red]A critical, unexpected error occurred during the patch workflow:[/bold red] {e}")
-            # Potentially log this unexpected error as well if not already done
-            context_manager.add_message(role="system", content=f"Critical unexpected error during patch: {e}")
+            # Catch any *unexpected* errors that bubble up from _run_patch_workflow
+            self.console.print(f"\n[bold red]A critical, unexpected error occurred during the patch workflow:[/bold red] {e}")
+            # Log to context history
+            self.context_manager.add_message(role="system", content=f"Critical unexpected error during patch (CLI): {e}")
 
 def get_class_methods(cls):
     # This helper is no longer used by do_help

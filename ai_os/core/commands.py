@@ -1,4 +1,4 @@
-from typing import List, Literal, Dict, Any, Callable
+from typing import List, Literal, Dict, Any, Callable, Optional
 from pathlib import Path
 # Import the global context_manager instance
 from ai_os.utils.context import context_manager
@@ -19,6 +19,7 @@ from pydantic import ValidationError
 import json # Needed for handling parsing errors if they involve json
 import subprocess # Add this import
 import os
+import uuid # Add this import
 
 # Import error logging utility
 from ai_os.utils.error_logging import log_parsing_error
@@ -45,6 +46,8 @@ def chat(prompt: str):
     # Add assistant response to global history after streaming is complete
     if full_response:
         context_manager.add_message(role="assistant", content=full_response)
+    
+    # log to temp file
 
 def add_item(item: str | Path, *, show_user: bool = False):
     """Adds text content or file content to the context's known items."""
@@ -93,46 +96,70 @@ def info(msg: str):
     """Logs an informational message to the user UI, but NOT to the context."""
     print(f"INFO: {msg}") # Use basic print for minimal version
 
-def patch(plan: str, strategy_name: str, console: Console) -> bool:
+def patch(plan: str, strategy_name: str, console: Console, user_approval_override: Optional[bool] = None) -> Dict[str, Any] | None:
     """
-    Orchestrates the patch generation (using a specific strategy) and application workflow.
-    Calls the selected strategy to get a Patch object, then calls the application logic.
-
+    Orchestrates the patch generation and application workflow.
     Args:
         plan: A string describing the desired code change.
         strategy_name: The name of the patch strategy to use (e.g., "full_file").
         console: The Rich Console instance for user interaction and output.
+        user_approval_override: If True/False, forces user approval on/off,
+                                otherwise relies on apply_patch_with_approval default (True).
 
     Returns:
-        True if the entire patch workflow completed successfully (generated, applied,
-        or rejected), False if a critical error occurred during generation or application.
+        A dictionary containing patch results if generated and processed (applied/rejected),
+        or None if a critical error occurred during generation or application.
     """
     # 1. Validate strategy name
     if strategy_name not in PATCH_STRATEGIES:
         console.print(f"[bold red]Error:[/bold red] Unknown patch strategy '{strategy_name}'. Available strategies: {list(PATCH_STRATEGIES.keys())}")
         context_manager.add_message(role="system", content=f"Attempted patch with unknown strategy: {strategy_name}")
-        return False # Indicate failure due to invalid input
-
+        return None # Indicate failure due to invalid input
     strategy_runner = PATCH_STRATEGIES[strategy_name]
 
     # 2. Run the selected strategy to generate the Patch object
-    generated_patch: Patch | None = None
-    raw_llm_response: str | None = None # Store the raw response
-    # The strategy_runner handles its own LLM calls and parsing based on formats
-    # It now returns a tuple (Patch object, raw_response_str) or raises an exception
-    generated_patch, raw_llm_response = strategy_runner(plan=plan, console=console)
-    # If strategy_runner completes without raising, generated_patch should be a Patch object
+    try:
+        generated_patch, raw_llm_response = strategy_runner(plan=plan, console=console)
+    except NotImplementedError as e:
+        console.print(f"[bold red]Error:[/bold red] Strategy '{strategy_name}' is not yet implemented.")
+        context_manager.add_message(role="system", content=f"Attempted unimplemented patch strategy: {strategy_name}")
+        return None # Indicate failure
+
+    # --- Log raw LLM response to /tmp ---
+    if raw_llm_response:
+        try:
+            import uuid, os
+            tmp_file_name = f"patch_llm_output_{uuid.uuid4()}.txt"
+            tmp_file_path = os.path.join("/tmp", tmp_file_name)
+            with open(tmp_file_path, "w") as f:
+                f.write(raw_llm_response)
+            console.print(f"[dim]Full LLM response saved to: {tmp_file_path}[/dim]")
+        except Exception as e:
+            console.print(f"[yellow]Warning:[/yellow] Could not save full LLM response to /tmp: {e}")
 
     # If generated_patch is None here, it means the strategy function returned None
     # which is not the expected behavior. It should return a Patch or raise.
     if generated_patch is None or not isinstance(generated_patch, Patch):
-         console.print(f"[bold red]Internal Error:[/bold red] Strategy '{strategy_name}' did not return a valid Patch object.")
-         context_manager.add_message(role="system", content=f"Internal error: Strategy '{strategy_name}' returned invalid object.")
-         return False # Indicate failure in generation phase
+        console.print(f"[bold red]Internal Error:[/bold red] Strategy '{strategy_name}' did not return a valid Patch object.")
+        context_manager.add_message(role="system", content=f"Internal error: Strategy '{strategy_name}' returned invalid object.")
+        return None # Indicate failure in generation phase
 
     # 4. Apply the generated Patch object with approval
     console.print("[dim]Strategy complete. Proceeding to application.[/dim]")
-    # apply_patch_with_approval handles user prompt, file writes, git add/commit, and logging its outcome
-    application_success = apply_patch_with_approval(generated_patch, console)
-    # apply_patch_with_approval returns True if applied or successfully handled 'nothing to commit', False if rejected or failed application/commit
-    return application_success # Return the result of the application step
+    try:
+        # apply_patch_with_approval needs to accept user_approval_override
+        # It now returns the result dict
+        application_result = apply_patch_with_approval(
+            generated_patch,
+            console=console,
+            user_approval_override=user_approval_override # Pass the override
+        )
+        return application_result # Return the structured result from apply_patch_with_approval
+    except Exception as e:
+        # Catch any *unexpected* errors that bubble up from the apply logic (git errors etc.)
+        # apply_patch_with_approval should ideally catch and log within, but this is a fallback.
+        console.print(f"\n[bold red]A critical, unexpected error occurred during patch application:[/bold red] {e}")
+        context_manager.add_message(role="system", content=f"Critical patch application error: {e}")
+        # Return a failure structure or re-raise? Let's return None to signify critical failure in the workflow.
+        # This should be distinct from user rejection.
+        return None
