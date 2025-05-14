@@ -1,4 +1,4 @@
-# AI-OS 😊
+# AI-OS 😊🚀
 
 **"Abandon vibe coding—embrace AI engineering."**
 
@@ -57,3 +57,4 @@ You are AI-OS.Tree-Of-Thought.
    • <code file="…">…
 ```
 ✨🚀
+```
