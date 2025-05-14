@@ -1,4 +1,4 @@
-# AI-OS 😊🚀
+# AI-OS 😊🚀🎉
 
 **"Abandon vibe coding—embrace AI engineering."**
 
