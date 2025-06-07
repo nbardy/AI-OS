@@ -25,6 +25,7 @@ console = Console() # Keep Rich Console for the cmd.Cmd shell output
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion, PathCompleter, WordCompleter
+from prompt_toolkit.document import Document
 from prompt_toolkit.styles import Style
 
 # --- Modern Prompt Toolkit Shell ---
@@ -46,27 +47,61 @@ class AIOSCompleter(Completer):
 
     def get_completions(self, document, complete_event):
         text = document.text_before_cursor.lstrip()
-        if not text or text.startswith('/') or text[:1] in ALIASES:
-            # Complete command
+        
+        # Case 1: Empty text or command completion
+        if not text:
             for c in self.command_completer.get_completions(document, complete_event):
                 yield c
-            # If /macro or @, also complete file path after command
-            if text.startswith('/macro') or text.startswith('@'):
-                after = text.split(maxsplit=1)
-                if len(after) > 1:
-                    # Complete file path
-                    arg_doc = document._replace(text=after[1], cursor_position=len(after[1]))
-                    for c in self.path_completer.get_completions(arg_doc, complete_event):
-                        yield c
-        elif text.split()[0] in ['/macro', '@']:
-            # Complete file path for /macro
-            after = text.split(maxsplit=1)
-            if len(after) > 1:
-                arg_doc = document._replace(text=after[1], cursor_position=len(after[1]))
-                for c in self.path_completer.get_completions(arg_doc, complete_event):
+            return
+        
+        # Case 2: Command starting with '/' (but not followed by space yet)
+        if text.startswith('/') and ' ' not in text:
+            for c in self.command_completer.get_completions(document, complete_event):
+                yield c
+            return
+        
+        # Case 3: Single alias character - show command completions
+        if len(text) == 1 and text[0] in ALIASES:
+            for c in self.command_completer.get_completions(document, complete_event):
+                yield c
+            return
+        
+        # Case 4: @ followed by file path - THIS IS THE KEY CASE  
+        if text.startswith('@'):
+            path_part = text[1:]  # Remove the '@' character
+            if path_part:  # If there's something after @
+                # Create a new document for just the path part
+                path_doc = Document(text=path_part, cursor_position=len(path_part))
+                for c in self.path_completer.get_completions(path_doc, complete_event):
+                    # Prepend '@' to the completion and adjust start position
+                    yield Completion(
+                        text='@' + c.text,
+                        start_position=c.start_position - len(path_part) - 1
+                    )
+            else:
+                # Just '@' - complete files in current directory
+                empty_doc = Document(text='', cursor_position=0)
+                for c in self.path_completer.get_completions(empty_doc, complete_event):
+                    yield Completion(
+                        text='@' + c.text,
+                        start_position=-1  # Replace the '@'
+                    )
+            return
+        
+        # Case 5: /macro followed by space - complete file paths
+        if text.startswith('/macro '):
+            path_part = text[7:]  # Remove '/macro '
+            path_doc = Document(text=path_part, cursor_position=len(path_part))
+            for c in self.path_completer.get_completions(path_doc, complete_event):
+                yield c
+            return
+        
+        # Case 6: Other aliases followed by text
+        if text and text[0] in ALIASES and text[0] != '@':
+            # For other aliases, complete commands if no space yet
+            if ' ' not in text:
+                for c in self.command_completer.get_completions(document, complete_event):
                     yield c
-        else:
-            # Default: no completion
             return
 
 class AIOSPromptShell:
@@ -188,37 +223,21 @@ def initialize_cli():
 
     shell = AIOSPromptShell()
 
-    # --- Print available commands and aliases (adapted from do_help) ---
-    # Dynamically get command methods, excluding internal/hidden ones
-    command_methods = [name[3:] for name in dir(shell) if name.startswith('do_') and callable(getattr(shell, name))]
-    # Exclude help, quit, exit, and any command that is only reachable via alias
-    aliased_cmds = set(shell.aliases.values())
-    exclude_cmds = {'help', 'quit', 'exit'} # Don't list aliases directly as primary commands
-    # Primary commands are those with do_* methods not exclusively behind an alias
-    primary_commands = sorted([cmd for cmd in command_methods if cmd not in exclude_cmds and cmd not in aliased_cmds])
-    # Explicitly add help/exit/quit
-    system_commands = sorted([cmd for cmd in command_methods if cmd in exclude_cmds])
-
     console.print("\n[bold green]AI-OS Shell Ready[/bold green]")
-    # Add strategy info to startup message
-    console.print(f"[dim]Default patch strategy: '{shell.default_patch_strategy}'. Available strategies: {list(commands.PATCH_STRATEGIES.keys())}[/dim]")
+    console.print("[dim]Tab completion: commands, files, and directories. Type /help for commands.[/dim]")
 
-    console.print("[bold]Available commands:[/bold]")
-    if primary_commands:
-        console.print("  " + ", ".join([f"/{c}" for c in primary_commands]))
-    if system_commands:
-        console.print("  " + ", ".join([f"/{c}" for c in system_commands]))
+    console.print("\n[bold]Available commands:[/bold]")
+    console.print("  " + ", ".join(COMMANDS))
 
-    if shell.aliases:
+    if ALIASES:
         console.print("\n[bold]Aliases:[/bold]")
         # Show aliases like: '> (/chat)'
-        aliases_list = sorted([f"{alias} ({f'/{cmd}'}) " for alias, cmd in shell.aliases.items()])
+        aliases_list = sorted([f"{alias} ({ALIASES[alias]})" for alias in ALIASES])
         console.print("  " + ", ".join(aliases_list))
-    # --- End command/alias printing ---
 
     console.print("\nType /help for details on a command.")
     # Use the existing shell instance
-    shell.cmdloop()
+    shell.run()
 
 # The main entry point should be managed elsewhere (e.g., in __main__.py or main.py)
 # if __name__ == '__main__':
