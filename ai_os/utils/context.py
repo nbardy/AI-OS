@@ -64,6 +64,8 @@ class ContextManager:
             return []
 
     def get_llm_payload(self, user_prompt: str, include_history_count: int = 10) -> List[Message]:
+        self.load_git_repo() # Refresh known files from git before preparing payload
+
         # Gather file context
         file_context_content = ""
         included_files_count = 0

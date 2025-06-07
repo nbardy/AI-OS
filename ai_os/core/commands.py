@@ -24,6 +24,8 @@ import uuid # Add this import
 # Import error logging utility
 from ai_os.utils.error_logging import log_parsing_error
 
+# Note: File path tab completion is handled in cli.py using prompt_toolkit. No changes needed here for completion logic.
+
 # --- Public API functions used by the CLI ---
 
 def chat(prompt: str):
@@ -117,32 +119,68 @@ def patch(plan: str, strategy_name: str, console: Console, user_approval_overrid
         return None # Indicate failure due to invalid input
     strategy_runner = PATCH_STRATEGIES[strategy_name]
 
+    generated_patch: Optional[Patch] = None
+    raw_llm_response: Optional[str] = None
+
     # 2. Run the selected strategy to generate the Patch object
     try:
-        generated_patch, raw_llm_response = strategy_runner(plan=plan, console=console)
+        # Strategies should ideally return (Patch | None, str | None)
+        # If a strategy fails to parse but has the raw response, it should return (None, raw_response_text)
+        _patch_candidate, _raw_response_candidate = strategy_runner(plan=plan, console=console)
+        generated_patch = _patch_candidate
+        raw_llm_response = _raw_response_candidate
     except NotImplementedError as e:
         console.print(f"[bold red]Error:[/bold red] Strategy '{strategy_name}' is not yet implemented.")
         context_manager.add_message(role="system", content=f"Attempted unimplemented patch strategy: {strategy_name}")
         return None # Indicate failure
+    except ValidationError as e: # Catch Pydantic validation errors if strategies raise them
+        console.print(f"[bold red]Error parsing LLM response in strategy '{strategy_name}':[/bold red] {e}")
+        context_manager.add_message(role="system", content=f"Patch strategy '{strategy_name}' parsing error: {e}")
+        # raw_llm_response will be None here if the strategy raised before returning it.
+        # The logging block below will handle this.
+    except Exception as e: # Catch any other unexpected error from the strategy
+        console.print(f"[bold red]An unexpected error occurred within strategy '{strategy_name}':[/bold red] {e}")
+        context_manager.add_message(role="system", content=f"Unexpected error in patch strategy '{strategy_name}': {e}")
+        # raw_llm_response will likely be None here as well.
 
     # --- Log raw LLM response to /tmp ---
+    # This logging will now occur if raw_llm_response was successfully returned by the strategy,
+    # or if the strategy call completed but returned raw_llm_response as None.
     if raw_llm_response:
         try:
-            import uuid, os
             tmp_file_name = f"patch_llm_output_{uuid.uuid4()}.txt"
             tmp_file_path = os.path.join("/tmp", tmp_file_name)
             with open(tmp_file_path, "w") as f:
                 f.write(raw_llm_response)
             console.print(f"[dim]Full LLM response saved to: {tmp_file_path}[/dim]")
-        except Exception as e:
-            console.print(f"[yellow]Warning:[/yellow] Could not save full LLM response to /tmp: {e}")
+        except Exception as log_e:
+            console.print(f"[yellow]Warning:[/yellow] Could not save full LLM response to /tmp: {log_e}")
+    else:
+        # This means strategy_runner either didn't return a raw response,
+        # or an exception occurred before raw_llm_response could be assigned from its return.
+        console.print(f"[yellow]Warning:[/yellow] No raw LLM response was available from strategy '{strategy_name}' for logging. This might be due to an error during strategy execution before the response was obtained or returned.")
 
-    # If generated_patch is None here, it means the strategy function returned None
-    # which is not the expected behavior. It should return a Patch or raise.
-    if generated_patch is None or not isinstance(generated_patch, Patch):
-        console.print(f"[bold red]Internal Error:[/bold red] Strategy '{strategy_name}' did not return a valid Patch object.")
-        context_manager.add_message(role="system", content=f"Internal error: Strategy '{strategy_name}' returned invalid object.")
+    # If generated_patch is None at this point, it means:
+    # 1. Strategy returned (None, raw_response) -> raw_response was logged (if not None).
+    # 2. Strategy raised an exception caught above -> raw_response might not have been logged (if it was None).
+    #    In this case, generated_patch would still be its initial value (None).
+    if generated_patch is None:
+        # An error message would have already been printed by the exception handlers above if an exception occurred.
+        # If we are here because the strategy returned (None, "text_response") without raising an exception,
+        # this message clarifies that no valid patch object was produced.
+        if raw_llm_response is not None: # Check if we had raw response but still no patch
+             console.print(f"[bold red]Strategy Error:[/bold red] Strategy '{strategy_name}' did not produce a valid patch object, though a raw LLM response was received.")
+        # else: an error message was already printed by an exception handler, or no raw response was ever available.
+
+        context_manager.add_message(role="system", content=f"Strategy '{strategy_name}' failed to produce a patch. Raw response logged if it was available.")
         return None # Indicate failure in generation phase
+    
+    # Ensure generated_patch is indeed a Patch object if not None
+    if not isinstance(generated_patch, Patch):
+        console.print(f"[bold red]Internal Error:[/bold red] Strategy '{strategy_name}' returned an invalid object type instead of a Patch.")
+        context_manager.add_message(role="system", content=f"Internal error: Strategy '{strategy_name}' returned invalid object type.")
+        return None
+
 
     # 4. Apply the generated Patch object with approval
     console.print("[dim]Strategy complete. Proceeding to application.[/dim]")

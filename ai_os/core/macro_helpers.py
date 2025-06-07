@@ -70,8 +70,16 @@ def patch(plan: str, user_approval: bool = True) -> Dict[str, Any] | None:
     """
     Initiate the patch workflow (generate, preview, apply).
     Returns the result dictionary from the patch application workflow or None on critical failure.
+    Adds a 'files' key: a list of file objects with 'path' and 'contents'.
     """
-    return _require_runner().patch(plan, user_approval)
+    result = _require_runner().patch(plan, user_approval)
+    if result and 'patch_obj' in result and hasattr(result['patch_obj'], 'file_changes'):
+        # Build a list of file objects for macro convenience
+        files = []
+        for path, contents in result['patch_obj'].file_changes.items():
+            files.append(type('PatchedFile', (), {'path': path, 'contents': contents}))
+        result['files'] = files
+    return result
 
 def approve(msg: str) -> bool:
     """

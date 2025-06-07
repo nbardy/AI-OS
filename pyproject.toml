@@ -9,10 +9,19 @@ description = "A description of your project"
 readme = "README.md"
 requires-python = ">=3.8"
 # Add your dependencies here, for example:
-# dependencies = [
-#     "requests",
-#     "numpy",
-# ]
+dependencies = [
+    "prompt_toolkit>=3.0.0",
+]
+
+
+
+[project.scripts]
+aios = "main:main"          # ← point to the main() function in main.py
+
+[tool.setuptools]           # ← add this table if it doesn't exist
+py-modules = ["main"]       # ← tells setuptools to install main.py as a module
+
+
 
 [project.urls]
 "Homepage" = "https://github.com/nbardy/ai_os" # Replace with your actual URL
