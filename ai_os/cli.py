@@ -60,8 +60,8 @@ class AIOSCompleter(Completer):
                 yield c
             return
         
-        # Case 3: Single alias character - show command completions
-        if len(text) == 1 and text[0] in ALIASES:
+        # Case 3: Single alias character - show command completions (except @)
+        if len(text) == 1 and text[0] in ALIASES and text[0] != '@':
             for c in self.command_completer.get_completions(document, complete_event):
                 yield c
             return
@@ -69,23 +69,23 @@ class AIOSCompleter(Completer):
         # Case 4: @ followed by file path - THIS IS THE KEY CASE  
         if text.startswith('@'):
             path_part = text[1:]  # Remove the '@' character
-            if path_part:  # If there's something after @
-                # Create a new document for just the path part
-                path_doc = Document(text=path_part, cursor_position=len(path_part))
-                for c in self.path_completer.get_completions(path_doc, complete_event):
-                    # Prepend '@' to the completion and adjust start position
-                    yield Completion(
-                        text='@' + c.text,
-                        start_position=c.start_position - len(path_part) - 1
-                    )
-            else:
-                # Just '@' - complete files in current directory
-                empty_doc = Document(text='', cursor_position=0)
-                for c in self.path_completer.get_completions(empty_doc, complete_event):
-                    yield Completion(
-                        text='@' + c.text,
-                        start_position=-1  # Replace the '@'
-                    )
+            
+            # Create a document for just the path part
+            path_doc = Document(text=path_part, cursor_position=len(path_part))
+            
+            for c in self.path_completer.get_completions(path_doc, complete_event):
+                # The completion text should be the full path starting with @
+                # c.text is the part that would complete the path_part
+                completed_text = '@' + path_part[:len(path_part) + c.start_position] + c.text
+                
+                # start_position should be relative to the original @ position
+                # We want to replace from where the completion starts in the path part
+                start_pos = c.start_position - len(path_part) - 1
+                
+                yield Completion(
+                    text=completed_text,
+                    start_position=start_pos
+                )
             return
         
         # Case 5: /macro followed by space - complete file paths
@@ -136,7 +136,7 @@ class AIOSPromptShell:
             return
         # Alias expansion
         if line[0] in ALIASES:
-            line = ALIASES[line[0]] + line[1:]
+            line = ALIASES[line[0]] + ' ' + line[1:]
         parts = line.split(maxsplit=1)
         cmd = parts[0]
         arg = parts[1] if len(parts) > 1 else ''
@@ -177,9 +177,33 @@ class AIOSPromptShell:
             app.run()
             self.console.print("\n[bold green]Returned to AI-OS shell.[/bold green]")
         elif cmd in ['/patch', '+']:
-            self.console.print("[yellow]Patch command not yet implemented in prompt_toolkit shell.[/yellow]")
+            if not arg:
+                self.console.print("[yellow]Usage: /patch <plan> [strategy][/yellow]")
+                return
+            # Parse the arguments for patch: plan and optional strategy
+            parts = arg.split(' strategy=', 1)
+            plan = parts[0].strip()
+            strategy_name = parts[1].strip() if len(parts) > 1 else "full_file"
+            
+            try:
+                result = commands.patch(plan, strategy_name, self.console)
+                if result:
+                    self.console.print(f"[green]Patch operation completed successfully![/green]")
+                else:
+                    self.console.print(f"[yellow]Patch operation was not completed.[/yellow]")
+            except Exception as e:
+                self.console.print(f"[bold red]An error occurred while running patch: {e}[/bold red]")
         elif cmd in ['/chat', '>']:
-            self.console.print("[yellow]Chat command not yet implemented in prompt_toolkit shell.[/yellow]")
+            if not arg:
+                self.console.print("[yellow]Usage: /chat <prompt>  or  > <prompt>[/yellow]")
+                return
+            try:
+                # Stream the response chunks
+                for chunk in commands.chat(arg):
+                    print(chunk, end='', flush=True)
+                print()  # Add newline at the end
+            except Exception as e:
+                self.console.print(f"[bold red]An error occurred while chatting: {e}[/bold red]")
         else:
             self.console.print(f"[yellow]Unknown command: '{line}'. Type /help for available commands.[/yellow]")
 

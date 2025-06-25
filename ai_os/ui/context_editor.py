@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, List
 from pathlib import Path
 from rich.text import Text
 
@@ -67,9 +67,17 @@ def populate_textual_tree(parent_node: TreeNode[ContextFileTreeNodeData], tree_d
         full_path_relative = Path(*new_path_parts)
 
         if is_dir:
+            # Calculate folder status (ON/OFF/MIXED)
+            folder_status = get_folder_status(full_path_relative)
+            status_style = "green" if folder_status == "ON" else ("red" if folder_status == "OFF" else "yellow")
+            
+            dir_label = Text(part)
+            if folder_status != "NONE":
+                dir_label.append(f" ({folder_status})", style=f"dim {status_style}")
+            
             # Always add to the parent_node passed to the function
             dir_node = parent_node.add( # Use parent_node.add
-                part,
+                dir_label,
                 allow_expand=True,
                 # Store the relative path for the directory node data
                 data=ContextFileTreeNodeData(path=full_path_relative, is_dir=True)
@@ -80,8 +88,9 @@ def populate_textual_tree(parent_node: TreeNode[ContextFileTreeNodeData], tree_d
         else:
             file_data: KnownFileData = node_data_or_dict # node_data_or_dict is the KnownFileData for files
             status_text = "ON" if file_data.include_in_prompt else "OFF"
+            status_style = "green" if file_data.include_in_prompt else "red"
             node_label = Text(str(Path(part).name)) # Use only the final part (filename) for display
-            node_label.append(f" ({status_text})", style="dim")
+            node_label.append(f" ({status_text})", style=f"dim {status_style}")
 
             # Store the *original* Path from KnownFileData for the file node data
             # This is the actual path relative to the repo root needed for toggling
@@ -92,15 +101,61 @@ def populate_textual_tree(parent_node: TreeNode[ContextFileTreeNodeData], tree_d
             )
 
 
+def get_folder_status(folder_path: Path) -> str:
+    """Get the status of a folder: ON (all files on), OFF (all files off), MIXED (some on/some off), NONE (no files)"""
+    files = context_manager.get_known_files()
+    folder_str = str(folder_path)
+    
+    # Find all files that are in this folder (including subdirectories)
+    folder_files = []
+    for path, data in files.items():
+        path_str = str(path)
+        # Check if this file is within the folder
+        if path_str.startswith(folder_str + "/") or path == folder_path:
+            folder_files.append(data)
+    
+    if not folder_files:
+        return "NONE"
+    
+    on_count = sum(1 for data in folder_files if data.include_in_prompt)
+    
+    if on_count == 0:
+        return "OFF"
+    elif on_count == len(folder_files):
+        return "ON"
+    else:
+        return "MIXED"
+
+
+def get_files_in_folder(folder_path: Path) -> List[Path]:
+    """Get all file paths that are within the given folder path (including subdirectories)"""
+    files = context_manager.get_known_files()
+    folder_str = str(folder_path)
+    
+    result = []
+    for path in files.keys():
+        path_str = str(path)
+        # Check if this file is within the folder
+        if path_str.startswith(folder_str + "/"):
+            result.append(path)
+    
+    return result
+
+
 class ContextEditorApp(App[None]):
     """Textual App for editing the context file tree."""
     CSS = """
     Screen {
         layout: vertical;
     }
+    #help-container {
+        height: 3;
+        border: thick $panel;
+        background: $surface;
+    }
     #file-tree-container {
         border: thick $panel;
-        height: 60%;
+        height: 55%;
     }
     #message-history-container {
         border: thick $panel;
@@ -122,6 +177,12 @@ class ContextEditorApp(App[None]):
     def compose(self) -> ComposeResult:
         """Compose the Textual UI."""
         yield Header()
+        
+        # Add help text container
+        with Container(id="help-container"):
+            help_text = Static("Press [bold cyan]SPACE[/bold cyan] to toggle files/folders ON/OFF. Folders show [green]ON[/green]/[red]OFF[/red]/[yellow]MIXED[/yellow] status. Toggle folder to change all contents.")
+            yield help_text
+        
         with Container(id="file-tree-container"):
             # The Tree widget itself is the root
             self.file_tree_widget: Tree[ContextFileTreeNodeData] = Tree("Git Tracked Files")
@@ -188,36 +249,59 @@ class ContextEditorApp(App[None]):
         self.history_label.update(history_text)
 
     def action_toggle_include(self):
-        """Toggle inclusion status of the selected file."""
+        """Toggle inclusion status of the selected file or folder."""
         selected_node: TreeNode[ContextFileTreeNodeData] | None = self.file_tree_widget.cursor_node
-        # Ensure a file node is selected
-        if selected_node and selected_node.data and isinstance(selected_node.data, ContextFileTreeNodeData) and not selected_node.data.is_dir:
-            target_path = selected_node.data.path # Use the full path stored in data
+        
+        if not selected_node or not selected_node.data or not isinstance(selected_node.data, ContextFileTreeNodeData):
+            return
+            
+        target_path = selected_node.data.path
+        
+        if selected_node.data.is_dir:
+            # Handle folder toggling
+            folder_files = get_files_in_folder(target_path)
+            if not folder_files:
+                return  # No files in folder
+                
+            folder_status = get_folder_status(target_path)
+            
+            # Determine new state: if MIXED or ON, turn everything OFF; if OFF, turn everything ON  
+            if folder_status == "OFF":
+                new_state = True  # Turn everything ON
+            else:  # folder_status is "ON" or "MIXED"
+                new_state = False  # Turn everything OFF
+            
+            # Toggle all files in the folder
+            for file_path in folder_files:
+                current_state = context_manager.get_known_files()[file_path].include_in_prompt
+                if current_state != new_state:
+                    context_manager.toggle_path(file_path)
+        else:
+            # Handle individual file toggling
             commands.toggle_context_file(str(target_path))
-            # Remember cursor position and expansion state
-            cursor_path_relative = selected_node.data.path # Assuming node data path is relative or convertible
-            expanded_paths = {node.data.path for node in self.file_tree_widget.walk_expanded() if node.data and node.data.is_dir}
 
+        # Remember cursor position and expansion state
+        cursor_path_relative = selected_node.data.path
+        expanded_paths = {node.data.path for node in self.file_tree_widget.walk_expanded() if node.data and node.data.is_dir}
 
-            # Refresh the tree display to show the change
-            self.update_file_tree()
+        # Refresh the tree display to show the change
+        self.update_file_tree()
 
-            # Try to restore expansion state and cursor position
-            self.file_tree_widget.root.collapse_all() # Start collapsed
+        # Try to restore expansion state and cursor position
+        self.file_tree_widget.root.collapse_all() # Start collapsed
 
-            # Restore expansion state
-            for node in self.file_tree_widget.walk_nodes():
-                 if node.data and node.data.is_dir and node.data.path in expanded_paths:
-                      node.expand()
+        # Restore expansion state
+        for node in self.file_tree_widget.walk_nodes():
+             if node.data and node.data.is_dir and node.data.path in expanded_paths:
+                  node.expand()
 
-            # Find and select the node again by path
-            for node in self.file_tree_widget.walk_nodes():
-                if node.data and node.data.path == cursor_path_relative:
-                     self.file_tree_widget.cursor = node.id
-                     self.file_tree_widget.scroll_to_node(node) # Ensure cursor is visible
-                     node.select() # Ensure the node is selected
-                     break # Found and restored cursor
-
+        # Find and select the node again by path
+        for node in self.file_tree_widget.walk_nodes():
+            if node.data and node.data.path == cursor_path_relative:
+                 self.file_tree_widget.cursor = node.id
+                 self.file_tree_widget.scroll_to_node(node) # Ensure cursor is visible
+                 node.select() # Ensure the node is selected
+                 break # Found and restored cursor
 
     def action_quit_editor(self):
         """Quit the context editor."""

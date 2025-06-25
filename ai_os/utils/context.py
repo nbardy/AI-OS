@@ -53,10 +53,27 @@ class ContextManager:
                 cwd=os.getcwd()
             )
             files_to_add = [Path(p.strip()) for p in result.stdout.splitlines() if p.strip()]
+            
+            # Define binary file extensions to skip
+            binary_extensions = {'.pyc', '.pyo', '.so', '.dll', '.exe', '.bin', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.ico', '.svg', '.pdf', '.zip', '.tar', '.gz', '.rar', '.7z'}
+            
             for f in files_to_add:
                 try:
-                    content = f.read_text()
+                    # Skip binary files
+                    if f.suffix.lower() in binary_extensions:
+                        continue
+                    
+                    # Check if file exists before trying to read it
+                    if not f.exists():
+                        print(f"[Warning] File {f} is tracked by git but doesn't exist in filesystem")
+                        continue
+                    
+                    content = f.read_text(encoding='utf-8')
                     self.add_known_file(path=f, content=content)
+                except UnicodeDecodeError:
+                    # Handle files that look like text but contain binary data
+                    print(f"[Warning] Skipping binary file {f}")
+                    continue
                 except Exception as e:
                     print(f"[Warning] Could not read file {f} during git repo load: {e}")
             return files_to_add
