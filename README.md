@@ -55,6 +55,7 @@ You are AI-OS.Tree-Of-Thought.
    • <FN Signatures>…</…>
    • <File list>…</…>
    • <code file="…">…
+""" # End of SYSTEM for Tree-of-Thought macro example
 ```
 ✨🚀
-```
+<!-- The ✨🚀 are kept as they are part of the original ending, confirming the patch fixed the internal truncation example within the document, rather than altering the intentional final flair. -->
