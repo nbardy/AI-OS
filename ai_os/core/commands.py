@@ -1,9 +1,11 @@
 from typing import List, Literal, Dict, Any, Callable, Optional
 from pathlib import Path
+import time
 # Import the global context_manager instance
 from ai_os.utils.context import context_manager
 from ai_os.core.chat import chat_completion # Import the raw chat function
 from ai_os.core.models import Message, KnownFileData, Patch
+from ai_os.utils.thinking_indicator import ThinkingIndicator
 
 # Third-Party Imports
 from rich.console import Console
@@ -36,14 +38,35 @@ def chat(prompt: str):
     # Get the messages list formatted for the LLM (includes files and history)
     messages_for_llm = context_manager.get_llm_payload(user_prompt=prompt)
 
+    # Create and start thinking indicator
+    indicator = ThinkingIndicator()
+    indicator.start()
+    
     # Call the core chat logic with the prepared messages
     assistant_response_chunks = chat_completion(messages=messages_for_llm)
 
     # Stream chunks and build full response
     full_response = ""
+    stream_start = None
+    think_time = None
+    
     for chunk in assistant_response_chunks:
+        if stream_start is None:
+            # First chunk received, stop thinking indicator
+            think_time = indicator.stop()
+            stream_start = time.time()
+            # Add thinking time to context
+            context_manager.add_message(
+                role="system", 
+                content=f"LLM thinking time: {think_time:.1f}s"
+            )
         yield chunk # Yield chunks to the CLI for streaming display
         full_response += chunk
+
+    # Calculate and yield stream time
+    if stream_start:
+        stream_time = time.time() - stream_start
+        yield f"\n[dim](Thinking: {think_time:.1f}s, Streaming: {stream_time:.1f}s)[/dim]"
 
     # Add assistant response to global history after streaming is complete
     if full_response:
