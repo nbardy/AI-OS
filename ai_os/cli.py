@@ -168,10 +168,24 @@ class AIOSPromptShell:
                     self.console.print(f"[bold red]Error output:[/bold red]\n{result.stderr.strip()}")
                 if result.returncode != 0:
                     self.console.print(f"[yellow]Command exited with status {result.returncode}[/yellow]")
+                
+                # Add command and its output to context
+                command_record = f"Command: {arg}\n"
+                if result.stdout:
+                    command_record += f"Output:\n{result.stdout.strip()}\n"
+                if result.stderr:
+                    command_record += f"Error output:\n{result.stderr.strip()}\n"
+                command_record += f"Exit code: {result.returncode}"
+                
+                context_manager.add_message(role="system", content=command_record)
             except FileNotFoundError:
                 self.console.print(f"[bold red]Error: Command not found: {arg.split()[0]}[/bold red]")
+                # Also add error to context
+                context_manager.add_message(role="system", content=f"Command: {arg}\nError: Command not found: {arg.split()[0]}")
             except Exception as e:
                 self.console.print(f"[bold red]An unexpected error occurred while trying to run the command:[/bold red] {e}")
+                # Also add error to context
+                context_manager.add_message(role="system", content=f"Command: {arg}\nError: Unexpected error: {e}")
         elif cmd in ['/context']:
             app = ContextEditorApp()
             app.run()

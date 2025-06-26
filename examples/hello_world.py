@@ -4,19 +4,20 @@ def main(ctx, **kwargs):
     target_name = kwargs.get("name", "World")
     loops = int(kwargs.get("loops", 1))
 
-    yield ah.log(f"Macro started. Target: {target_name}, Loops: {loops}")
-    yield ah.log(f"Initial registers: {ctx.get('registers')}")
+    ah.log(f"Macro started. Target: {target_name}, Loops: {loops}")
+    ah.log(f"Initial variables: {ctx.get('vars')}")
     
     for i in range(loops):
-        yield ah.log(f"Loop {i+1}/{loops}")
-        yield ah.chat(f"Tell me a fun fact about the name {target_name} or the number {i+1}.")
+        ah.log(f"Loop {i+1}/{loops}")
+        ah.chat(f"Tell me a fun fact about the name {target_name} or the number {i+1}.")
         
         # Example shell command with capture
-        hostname_output = yield from ah.shell("hostname", capture_to="my_hostname")
-        yield ah.log(f"Hostname was: {hostname_output.strip()}")
-        yield ah.log(f"Hostname from register: {ah.get_register(ctx, 'my_hostname').strip()}")
+        hostname_output = ah.shell("hostname", capture=True)
+        ah.log(f"Hostname was: {hostname_output.strip()}")
+        
+        # Check exit code
+        exit_code = ah.get_last_shell_exit_code()
+        if exit_code != 0:
+            ah.log("Hostname command failed!")
 
-        if ctx['last_shell_exit_code'] != 0:
-            yield ah.log("Hostname command failed!")
-
-    yield ah.log("Macro finished.")
+    ah.log("Macro finished.")

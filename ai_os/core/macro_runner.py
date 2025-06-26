@@ -148,11 +148,24 @@ class MacroRunner:
                 self.console.print(f"[red]Stderr:[/red]\n{process.stderr.strip()}")
 
             self.ctx['last_shell_exit_code'] = process.returncode
+            
+            # Add command execution to context
+            command_record = f"Shell command: {cmd}\n"
+            if process.stdout:
+                command_record += f"Output:\n{process.stdout.strip()}\n"
+            if process.stderr:
+                command_record += f"Error:\n{process.stderr.strip()}\n"
+            command_record += f"Exit code: {process.returncode}"
+            
+            context_manager.add_message(role="system", content=command_record)
+            
             return process.stdout.strip() if capture else process.returncode # Strip stdout
 
         except Exception as e:
             self.console.print(f"[bold red]Error running shell command '{cmd}': {e}[/bold red]")
             self.ctx['last_shell_exit_code'] = -1
+            # Also add error to context
+            context_manager.add_message(role="system", content=f"Shell command: {cmd}\nError: {e}")
             return f"SHELL_ERROR: {e}" if capture else -1
 
     def patch(self, plan: str, user_approval: bool = True) -> Dict[str, Any] | None:
@@ -163,9 +176,12 @@ class MacroRunner:
 
         self.console.print(f"[dim]Macro requests patch workflow for plan: '{plan}'[/dim]")
         try:
-            patch_result = self.cli_instance._run_patch_workflow(
+            # Use the commands.patch function directly with default strategy
+            patch_result = commands.patch(
                 plan=plan,
-                user_approval=user_approval 
+                strategy_name="full_file",
+                console=self.console,
+                user_approval_override=user_approval
             )
             return patch_result 
         except Exception as e:
@@ -180,7 +196,8 @@ class MacroRunner:
 
         self.console.print(f"[bold cyan]Macro asks for approval:[/bold cyan] {msg}")
         try:
-            response = self.cli_instance._ask_approval(msg)
+            from rich.prompt import Confirm
+            response = Confirm.ask(msg)
             self.console.print(f"[dim]User responded: {'Yes' if response else 'No'}[/dim]")
             return response 
         except Exception as e:

@@ -75,13 +75,23 @@ def apply_patch_with_approval(
     files_to_add.sort() # Consistent order
 
     # Write Files
+    files_actually_changed = []
     try:
         for file_path_str in files_to_add:
             content = patch.file_changes[file_path_str]
             p = Path(file_path_str)
+            
+            # Check if file already exists with same content
+            if p.exists():
+                existing_content = p.read_text(encoding='utf-8')
+                if existing_content.strip() == content.strip():
+                    console.print(f"[dim]File {p} already has identical content, skipping[/dim]")
+                    continue
+            
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(content, encoding='utf-8')
             console.print(f"[dim]Wrote {p}[/dim]")
+            files_actually_changed.append(file_path_str)
     except Exception as e:
          console.print(f"[bold red]Error writing files:[/bold red] {e}")
          context_manager.add_message(role="system", content=f"Error writing patch files: {e}.")
@@ -91,20 +101,27 @@ def apply_patch_with_approval(
 
     # Git Add
     try:
-        if files_to_add:
-            _run_git(['add', '--'] + files_to_add)
-            console.print(f"[dim]Staged {len(files_to_add)} files.[/dim]")
+        if files_actually_changed:
+            _run_git(['add', '--'] + files_actually_changed)
+            console.print(f"[dim]Staged {len(files_actually_changed)} files.[/dim]")
         else:
-             console.print("[yellow]No files to stage.[/yellow]")
+             console.print("[yellow]No files to stage (all files already have identical content).[/yellow]")
     except subprocess.CalledProcessError as e:
          console.print(f"""[bold red]Git Add failed:[/bold red]
 {e.stderr.strip()}""")
          context_manager.add_message(role="system", content=f"Git add failed: {e.stderr.strip()}")
          return {'applied': False, 'sha': None, 'log_file': None, 'patch_obj': patch, 'error': e.stderr.strip()}
 
+    # Check if we have any files to commit
+    if not files_actually_changed:
+        console.print("[yellow]No changes to commit - all files already have identical content.[/yellow]")
+        context_manager.add_message(role="system", content="Patch had no changes - all files already existed with identical content.")
+        # Return success since the desired state is already achieved
+        return {'applied': True, 'sha': None, 'log_file': None, 'patch_obj': patch, 'unchanged': True}
+    
     # Git Commit Message
     commit_summary_lines = [
-        f"- {f}: {summaries.get(f, 'Update')}" for f in sorted(files_to_add)
+        f"- {f}: {summaries.get(f, 'Update')}" for f in sorted(files_actually_changed)
     ]
     commit_message = "Apply AI-OS patch\n\n" + "\n".join(commit_summary_lines)
 
