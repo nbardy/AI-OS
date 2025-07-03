@@ -17,6 +17,9 @@ from ai_os.utils.context import context_manager
 from ai_os.core import commands
 # Import necessary types from models
 from ai_os.core.models import KnownFileData
+# Import model selector
+from ai_os.utils.config import config_manager
+from ai_os.ui.model_selector import run_model_selector
 
 # --- Textual Context Editor App ---
 
@@ -170,6 +173,7 @@ class ContextEditorApp(App[None]):
 
     BINDINGS = [
         ("space", "toggle_include", "Toggle Include"),
+        ("m", "open_model_selector", "Model Selector"),
         ("q", "quit_editor", "Quit"),
         ("escape", "quit_editor", "Quit"),
     ]
@@ -180,7 +184,7 @@ class ContextEditorApp(App[None]):
         
         # Add help text container
         with Container(id="help-container"):
-            help_text = Static("Press [bold cyan]SPACE[/bold cyan] to toggle files/folders ON/OFF. Folders show [green]ON[/green]/[red]OFF[/red]/[yellow]MIXED[/yellow] status. Toggle folder to change all contents.")
+            help_text = Static("Press [bold cyan]SPACE[/bold cyan] to toggle files/folders ON/OFF. Press [bold cyan]M[/bold cyan] for model selector. Folders show [green]ON[/green]/[red]OFF[/red]/[yellow]MIXED[/yellow] status.")
             yield help_text
         
         with Container(id="file-tree-container"):
@@ -302,6 +306,11 @@ class ContextEditorApp(App[None]):
                  self.file_tree_widget.scroll_to_node(node) # Ensure cursor is visible
                  node.select() # Ensure the node is selected
                  break # Found and restored cursor
+
+    async def action_open_model_selector(self):
+        """Open the model selector."""
+        # Model selection is now handled via /model command
+        self.notify("Use /model command to select models")
 
     def action_quit_editor(self):
         """Quit the context editor."""

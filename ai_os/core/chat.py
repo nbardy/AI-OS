@@ -3,12 +3,11 @@ import httpx
 from typing import List
 from .models import Message
 
-def chat_completion(messages: List[Message], model: str = "google/gemini-2.5-flash-preview:thinking"):
+def chat_completion(messages: List[Message], model: str = "google/gemini-2.5-flash-preview:thinking", enable_search: bool = False):
     """Sends messages to OpenRouter API and yields response chunks."""
     api_key = os.environ.get("OPENROUTER_API_KEY")
     if not api_key:
-        print("Error: OPENROUTER_API_KEY environment variable not set.")
-        return
+        raise ValueError("OPENROUTER_API_KEY environment variable not set")
 
     client = httpx.Client(
         base_url="https://openrouter.ai/api/v1",
@@ -16,15 +15,18 @@ def chat_completion(messages: List[Message], model: str = "google/gemini-2.5-fla
         timeout=600.0,
     )
 
+    # Build request payload
+    payload = {
+        "model": model if not enable_search else f"{model}:online",
+        "messages": [msg.model_dump() for msg in messages],
+        "stream": True,
+    }
+
     try:
         with client.stream(
             "POST",
             "/chat/completions",
-            json={
-                "model": model,
-                "messages": [msg.model_dump() for msg in messages],
-                "stream": True,
-            },
+            json=payload,
         ) as response:
             response.raise_for_status()
             for chunk in response.iter_lines():

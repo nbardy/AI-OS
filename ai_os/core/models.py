@@ -1,10 +1,18 @@
-from typing import Literal, List, Dict
+from typing import Literal, List, Dict, Union
 from pydantic import BaseModel
 from pathlib import Path
 
+class ImageContent(BaseModel):
+    type: Literal["image_url"]
+    image_url: Dict[str, str]  # {"url": "data:image/jpeg;base64,..." or "https://..."}
+
+class TextContent(BaseModel):
+    type: Literal["text"]
+    text: str
+
 class Message(BaseModel):
     role: Literal["user", "assistant", "system"]
-    content: str
+    content: Union[str, List[Union[TextContent, ImageContent]]]
     # files field removed - content injected
 
 class KnownFileData(BaseModel):

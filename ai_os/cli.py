@@ -27,17 +27,19 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion, PathCompleter, WordCompleter
 from prompt_toolkit.document import Document
 from prompt_toolkit.styles import Style
+from ai_os.utils.command_history import CommandHistoryManager, PersistentHistory
 
 # --- Modern Prompt Toolkit Shell ---
 
 COMMANDS = [
-    '/macro', '/patch', '/run', '/context', '/exit', '/help', '/quit',
+    '/macro', '/patch', '/run', '/context', '/model', '/exit', '/help', '/quit', '/history', '/search',
 ]
 ALIASES = {
     '>': '/chat',
     '+': '/patch',
     '!': '/run',
     '@': '/macro',
+    '?': '/search',
 }
 
 class AIOSCompleter(Completer):
@@ -107,9 +109,18 @@ class AIOSCompleter(Completer):
 class AIOSPromptShell:
     def __init__(self):
         self.console = console
-        self.session = PromptSession(completer=AIOSCompleter(), style=Style.from_dict({
-            'prompt': 'ansicyan bold',
-        }))
+        
+        # Initialize command history
+        self.history_manager = CommandHistoryManager(max_history=100)
+        self.persistent_history = PersistentHistory(self.history_manager)
+        
+        self.session = PromptSession(
+            completer=AIOSCompleter(), 
+            style=Style.from_dict({
+                'prompt': 'ansicyan bold',
+            }),
+            history=self.persistent_history
+        )
         self.running = True
 
     def run(self):
@@ -146,6 +157,22 @@ class AIOSPromptShell:
         elif cmd in ['/help']:
             self.console.print("[bold]Available commands:[/bold] " + ", ".join(COMMANDS))
             self.console.print("[bold]Aliases:[/bold] " + ", ".join(f"{k} ({ALIASES[k]})" for k in ALIASES))
+            self.console.print("\n[dim]Use arrow keys (↑/↓) to navigate command history from previous sessions.[/dim]")
+        elif cmd in ['/history']:
+            if arg == 'clear':
+                self.history_manager.clear_history()
+                self.console.print("[green]Command history cleared.[/green]")
+            else:
+                history = self.history_manager.get_commands()
+                if history:
+                    self.console.print(f"[bold]Command History ({len(history)}/100):[/bold]")
+                    for i, cmd in enumerate(history[-20:], 1):  # Show last 20
+                        self.console.print(f"  {i:2d}. {cmd}")
+                    if len(history) > 20:
+                        self.console.print(f"  ... and {len(history) - 20} more")
+                    self.console.print("\n[dim]Use '/history clear' to clear history[/dim]")
+                else:
+                    self.console.print("[yellow]No command history found.[/yellow]")
         elif cmd in ['/macro', '@']:
             if not arg:
                 self.console.print("[yellow]Usage: /macro <path/to/macro.py> [key=value ...][/yellow]")
@@ -190,6 +217,14 @@ class AIOSPromptShell:
             app = ContextEditorApp()
             app.run()
             self.console.print("\n[bold green]Returned to AI-OS shell.[/bold green]")
+        elif cmd in ['/model']:
+            from ai_os.ui.minimal_model_selector import run_minimal_model_selector
+            selected_model = run_minimal_model_selector()
+            if selected_model:
+                self.console.print(f"[green]Model selected: {selected_model}[/green]")
+            else:
+                self.console.print("[yellow]No model selected[/yellow]")
+            self.console.print("\n[bold green]Returned to AI-OS shell.[/bold green]")
         elif cmd in ['/patch', '+']:
             if not arg:
                 self.console.print("[yellow]Usage: /patch <plan> [strategy][/yellow]")
@@ -212,12 +247,23 @@ class AIOSPromptShell:
                 self.console.print("[yellow]Usage: /chat <prompt>  or  > <prompt>[/yellow]")
                 return
             try:
-                # Stream the response chunks
-                for chunk in commands.chat(arg):
+                # Stream the response chunks with console for status indicator
+                for chunk in commands.chat(arg, console=self.console):
                     print(chunk, end='', flush=True)
                 print()  # Add newline at the end
             except Exception as e:
                 self.console.print(f"[bold red]An error occurred while chatting: {e}[/bold red]")
+        elif cmd in ['/search', '?']:
+            if not arg:
+                self.console.print("[yellow]Usage: /search <query>  or  ? <query>[/yellow]")
+                return
+            try:
+                # Stream the search response chunks with console for status indicator
+                for chunk in commands.search(arg, console=self.console):
+                    print(chunk, end='', flush=True)
+                print()  # Add newline at the end
+            except Exception as e:
+                self.console.print(f"[bold red]An error occurred while searching: {e}[/bold red]")
         else:
             self.console.print(f"[yellow]Unknown command: '{line}'. Type /help for available commands.[/yellow]")
 

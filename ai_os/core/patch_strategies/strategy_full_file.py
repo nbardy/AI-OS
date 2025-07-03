@@ -10,30 +10,42 @@ import uuid
 from typing import Dict, Tuple
 
 # ---------------------------------------------------------------------------
-# NOTE: The following prompt **must remain byte-for-byte identical**. Do NOT
-# alter spacing, newlines, or wording – downstream logic relies on it.
+# Patch format prompt - defines the expected output format for the LLM
 # ---------------------------------------------------------------------------
 STRATEGY_FORMAT_PROMPT = """
-You MUST provide the complete, final code changes using the following format AND ONLY this format.
+CRITICAL: You MUST follow this EXACT format. Any deviation will cause parsing failures.
 
-For each file output the entire the new file with changes.
+DO NOT:
+- DO NOT use markdown code fences (```xml, ```python, etc.)
+- DO NOT add any explanatory text before or after the format
+- DO NOT use markdown headers (##, ###) 
+- DO NOT include HTML/XML comments (<!-- -->) in the code content
+- DO NOT add any other XML tags besides <code>
+- DO NOT change the structure shown below
+- DO NOT add any text that is not part of the format
 
+YOU MUST:
+1. Start DIRECTLY with <code> tags - no preceding text
+2. Use the EXACT attribute names: filename="..." language="..."
+3. Put the ACTUAL code content between <code> and </code>
+4. End with the EXACT text: --- summaries ---
+5. List summaries as: filename: Brief description
 
-For each file to be changed, output xml block  with the following format:
-<code filename="foo.py" language="python">
-<!--- This is the full content of foo.py -->
+EXACT FORMAT TO FOLLOW:
+<code filename="path/to/file.py" language="python">
+actual python code here
+no comments about the code
+just the code itself
 </code>
-<code filename="bar.py" language="python">
-<!--- This is the full content of bar.py -->
+<code filename="path/to/another.rs" language="rust">
+actual rust code here
 </code>
-...
 
 --- summaries ---
-foo.py: Add new_helper function and Example class definition.
-bar.py: Add comprehensive tests for new_helper including empty and negative cases.
-...
+path/to/file.py: Brief description of changes
+path/to/another.rs: Brief description of changes
 
-Ensure there is no other text outside this specific structure.
+CRITICAL REMINDER: Output ONLY the format above. Start with <code>, end with summaries. Nothing else.
 """
 
 # ---------------------------------------------------------------------------
@@ -69,6 +81,9 @@ def _extract_code_blocks(xml_blob: str) -> Dict[str, str]:
             raise ValueError(f"Missing closing </code> tag for {filename}")
 
         content = xml_blob[tag_close + 1 : close_i]
+        # Strip any HTML/XML comments that might have been included
+        content = re.sub(r'<!---.*?-->', '', content, flags=re.DOTALL)
+        content = re.sub(r'<!--.*?-->', '', content, flags=re.DOTALL)
         file_changes[filename] = content.strip()
         i = close_i + len(close_tag)
 
@@ -80,8 +95,24 @@ def parse_xml_response(llm_response: str) -> Patch:
     Parse an LLM response that embeds <code …></code> sections followed by
     a `--- summaries ---` list.  Raises on any structural error.
     """
+    # Pre-process to handle common LLM deviations
+    cleaned_response = llm_response.strip()
+    
+    # Remove markdown code fences if present
+    if cleaned_response.startswith("```"):
+        # Find the end of the first line to skip language identifier
+        first_newline = cleaned_response.find("\n")
+        if first_newline > 0:
+            cleaned_response = cleaned_response[first_newline+1:]
+        # Remove closing fence
+        if cleaned_response.rstrip().endswith("```"):
+            cleaned_response = cleaned_response.rstrip()[:-3].rstrip()
+    
+    # Remove any leading/trailing whitespace again
+    cleaned_response = cleaned_response.strip()
+    
     summary_marker = r"\n\s*---\s*summaries\s*---\s*\n"
-    parts = re.split(summary_marker, llm_response, maxsplit=1, flags=re.DOTALL)
+    parts = re.split(summary_marker, cleaned_response, maxsplit=1, flags=re.DOTALL)
     xml_part = parts[0].strip()
     summary_part = parts[1].strip() if len(parts) > 1 else ""
 
@@ -160,9 +191,17 @@ Goal: {plan}
         )
 
     console.print("[dim]Parsing LLM response (state-machine XML parser)...[/dim]")
-    patch = parse_xml_response(stripped)
-    console.print("[dim]Patch object generated.[/dim]")
-    return patch, stripped
+    try:
+        patch = parse_xml_response(stripped)
+        console.print("[dim]Patch object generated.[/dim]")
+        return patch, stripped
+    except ValueError as e:
+        # Provide helpful error context
+        console.print(f"[bold red]Parsing failed:[/bold red] {e}")
+        console.print("[yellow]Response preview (first 200 chars):[/yellow]")
+        console.print(stripped[:200] + "..." if len(stripped) > 200 else stripped)
+        console.print("\n[yellow]Expected format: <code> tags followed by --- summaries ---[/yellow]")
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -194,6 +233,19 @@ src/my_module.py: Add basic function.
 tests/test_my_module.py: Add basic test.
 """
 
+    # Test with HTML comments (should be stripped)
+    TEST_LLM_RESPONSE_WITH_COMMENTS = """
+<code filename="src/commented.py" language="python">
+<!--- This is the full content of commented.py -->
+def hello():
+    <!-- This should also be removed -->
+    return "world"
+</code>
+
+--- summaries ---
+src/commented.py: Add hello function with comments that should be stripped.
+"""
+
     TEST_LLM_RESPONSE_MALFORMED_XML = """
 <code filename="src/bad.py" language="python">
 # Missing closing tag
@@ -205,6 +257,7 @@ src/bad.py: Should fail.
 
     tests = {
         "Valid Response": TEST_LLM_RESPONSE_VALID,
+        "Response with HTML Comments": TEST_LLM_RESPONSE_WITH_COMMENTS,
         "Malformed XML": TEST_LLM_RESPONSE_MALFORMED_XML,
     }
 
@@ -217,6 +270,13 @@ src/bad.py: Should fail.
             result = parse_xml_response(response)
             print("✅  Parsing Successful")
             print("Files parsed:", list(result.file_changes))
+            # Show content for comment test
+            if name == "Response with HTML Comments":
+                content = result.file_changes.get("src/commented.py", "")
+                print(f"Content after comment stripping:\n{content}")
+                if "<!--" in content or "<!---" in content:
+                    print("❌  HTML comments were not properly stripped!")
+                    all_passed = False
             if name in expected_failure:
                 all_passed = False
                 print("❌  Expected failure but succeeded.")

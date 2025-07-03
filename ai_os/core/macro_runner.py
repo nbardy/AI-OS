@@ -5,6 +5,7 @@ import sys
 import types
 import subprocess
 import os
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 from rich.console import Console
@@ -13,6 +14,7 @@ from . import macro_helpers # Import the helper module itself
 # Import core commands used by runner methods
 from ai_os.core import commands
 from ai_os.utils.context import context_manager # Access context manager directly or via cli_instance
+# from ai_os.utils.thinking_indicator import ThinkingIndicator  # Replaced with console.status
 
 
 class MacroRunner:
@@ -84,7 +86,13 @@ class MacroRunner:
                  raise ImportError(f"Could not load module spec for {module_path_str}")
 
         except Exception as e:
-             self.console.print(f"[bold red]Error importing macro module {module_path_str}:[/bold red] {e}")
+             error_msg = f"Error importing macro module {module_path_str}: {e}"
+             self.console.print(f"[bold red]{error_msg}[/bold red]")
+             # Add import error to context
+             try:
+                 context_manager.add_message(role="system", content=f"[MACRO ERROR] {error_msg}")
+             except Exception as ctx_e:
+                 self.console.print(f"[red]Error adding import error to context: {ctx_e}[/red]")
              raise 
         finally:
             # Clean up sys.path
@@ -109,20 +117,92 @@ class MacroRunner:
         except Exception as e:
              self.console.print(f"[red]Error adding macro log to context: {e}[/red]")
 
-    def chat(self, prompt: str) -> str:
+    def chat(self, prompt: str, include_context: bool = True, image_path: str = None) -> str:
         """Execute a chat prompt via commands.chat and return the full response."""
         if not isinstance(prompt, str) or not prompt.strip():
             self.console.print("[yellow]Macro chat action requires a non-empty prompt.[/yellow]")
             return f"CHAT_ERROR: Empty prompt"
 
         full_response = ""
-        self.console.print(f"[dim]Macro Chat: > {prompt}[/dim]") 
-        with self.console.status("Macro thinking...", spinner="dots"):
-             # Use the commands.chat function directly, collect output
-             for chunk in commands.chat(prompt=prompt): # Assumes commands.chat yields chunks
-                 self.console.print(chunk, end="", sep="")
-                 full_response += chunk
-        self.console.print() 
+        self.console.print(f"[dim]Macro Chat: > {prompt}[/dim]")
+        
+        # Handle image encoding if provided
+        image_content = None
+        if image_path and os.path.exists(image_path):
+            try:
+                import base64
+                with open(image_path, 'rb') as img_file:
+                    img_data = img_file.read()
+                    base64_data = base64.b64encode(img_data).decode('utf-8')
+                    ext = os.path.splitext(image_path)[1].lower()
+                    mime_type = {
+                        '.png': 'image/png',
+                        '.jpg': 'image/jpeg', 
+                        '.jpeg': 'image/jpeg',
+                        '.gif': 'image/gif',
+                        '.webp': 'image/webp'
+                    }.get(ext, 'image/png')
+                    image_content = f"data:{mime_type};base64,{base64_data}"
+                    self.console.print(f"[dim]Including image: {os.path.basename(image_path)}[/dim]")
+            except Exception as e:
+                self.console.print(f"[yellow]Warning: Could not encode image: {e}[/yellow]")
+        
+        if include_context:
+            # For context mode with images, we need to handle this differently
+            # since commands.chat doesn't support images directly
+            if image_content:
+                self.console.print("[yellow]Image support in context mode not yet implemented. Using text-only.[/yellow]")
+            # Use the normal commands.chat function with context
+            for chunk in commands.chat(prompt=prompt, console=self.console):
+                print(chunk, end="", flush=True)
+                full_response += chunk
+        else:
+            # Use direct chat_completion to bypass context
+            from ai_os.core.chat import chat_completion
+            from ai_os.core.models import Message, TextContent, ImageContent
+            from ai_os.utils.config import config_manager
+            
+            # Create message content with or without image
+            if image_content:
+                content = [
+                    TextContent(type="text", text=prompt),
+                    ImageContent(type="image_url", image_url={"url": image_content})
+                ]
+            else:
+                content = prompt
+            
+            # Create a pure message without context
+            messages = [Message(role="user", content=content)]
+            
+            # Get the selected model from config
+            selected_model = config_manager.get_current_model()
+            
+            # Use a vision model if image is provided
+            if image_content and selected_model:
+                # Check if current model supports vision, if not switch to a vision model
+                if 'vision' not in selected_model and 'claude-3' not in selected_model:
+                    self.console.print(f"[dim]Switching from {selected_model} to vision model[/dim]")
+                    selected_model = "anthropic/claude-3-5-sonnet"  # Default vision model
+            
+            # Call chat_completion directly
+            if selected_model:
+                assistant_response_chunks = chat_completion(messages=messages, model=selected_model)
+            else:
+                assistant_response_chunks = chat_completion(messages=messages)
+            
+            # Stream the response
+            for chunk in assistant_response_chunks:
+                print(chunk, end="", flush=True)
+                full_response += chunk
+                
+            # Still add the result to context for tracking
+            if image_content:
+                context_manager.add_message(role="user", content=f"[MACRO NO-CONTEXT WITH IMAGE] {prompt}")
+            else:
+                context_manager.add_message(role="user", content=f"[MACRO NO-CONTEXT] {prompt}")
+            context_manager.add_message(role="assistant", content=full_response)
+            
+        print() 
         return full_response 
 
     def shell(self, cmd: str, capture: bool = False) -> Any:
@@ -252,16 +332,36 @@ class MacroRunner:
                 main_func(self.ctx, **kwargs)
 
             except Exception as e:
-                self.console.print(f"[bold red]Error during macro execution:[/bold red] {e}")
+                error_msg = f"Error during macro execution: {e}"
+                self.console.print(f"[bold red]{error_msg}[/bold red]")
                 import traceback
-                self.console.print(traceback.format_exc())
+                traceback_str = traceback.format_exc()
+                self.console.print(traceback_str)
+                # Add execution error to context
+                try:
+                    context_manager.add_message(role="system", content=f"[MACRO ERROR] {error_msg}\n{traceback_str}")
+                except Exception as ctx_e:
+                    self.console.print(f"[red]Error adding execution error to context: {ctx_e}[/red]")
 
         except (ValueError, ImportError) as e:
-            self.console.print(f"[bold red]Macro Setup Error:[/bold red] {e}")
+            error_msg = f"Macro Setup Error: {e}"
+            self.console.print(f"[bold red]{error_msg}[/bold red]")
+            # Add setup error to context
+            try:
+                context_manager.add_message(role="system", content=f"[MACRO ERROR] {error_msg}")
+            except Exception as ctx_e:
+                self.console.print(f"[red]Error adding setup error to context: {ctx_e}[/red]")
         except Exception as e:
-            self.console.print(f"[bold red]Unexpected Macro Runtime Error:[/bold red] {e}")
+            error_msg = f"Unexpected Macro Runtime Error: {e}"
+            self.console.print(f"[bold red]{error_msg}[/bold red]")
             import traceback
-            self.console.print(traceback.format_exc())
+            traceback_str = traceback.format_exc()
+            self.console.print(traceback_str)
+            # Add runtime error to context
+            try:
+                context_manager.add_message(role="system", content=f"[MACRO ERROR] {error_msg}\n{traceback_str}")
+            except Exception as ctx_e:
+                self.console.print(f"[red]Error adding runtime error to context: {ctx_e}[/red]")
         finally:
             macro_helpers.set_runner(None)
             self.ctx.clear() # Clear context for next run

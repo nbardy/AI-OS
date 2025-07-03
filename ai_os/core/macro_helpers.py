@@ -52,12 +52,18 @@ def log_to_context(msg: str) -> None:
     """Log a message to the AI-OS context history (as a system message from Macro)."""
     _require_runner().log_to_context(msg)
 
-def chat(prompt: str) -> str:
+def chat(prompt: str, include_context: bool = True, image_path: str = None) -> str:
     """
     Send a prompt to the LLM via the chat command.
     Streams the reply to the console and returns the full assistant response string.
+    
+    Args:
+        prompt: The prompt to send to the LLM
+        include_context: If True (default), includes file context and conversation history.
+                        If False, sends a pure prompt without any context.
+        image_path: Optional path to an image file to include with the prompt (for vision models)
     """
-    return _require_runner().chat(prompt)
+    return _require_runner().chat(prompt, include_context=include_context, image_path=image_path)
 
 def shell(cmd: str, capture: bool = False) -> Any:
     """

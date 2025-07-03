@@ -5,7 +5,8 @@ import time
 from ai_os.utils.context import context_manager
 from ai_os.core.chat import chat_completion # Import the raw chat function
 from ai_os.core.models import Message, KnownFileData, Patch
-from ai_os.utils.thinking_indicator import ThinkingIndicator
+# from ai_os.utils.thinking_indicator import ThinkingIndicator  # Replaced with console.status
+from ai_os.utils.config import config_manager
 
 # Third-Party Imports
 from rich.console import Console
@@ -30,38 +31,67 @@ from ai_os.utils.error_logging import log_parsing_error
 
 # --- Public API functions used by the CLI ---
 
-def chat(prompt: str):
+def chat(prompt: str, console: Console = None):
     """Sends a prompt to the LLM using configured context."""
     # Add user prompt to global history first
     context_manager.add_message(role="user", content=prompt)
 
     # Get the messages list formatted for the LLM (includes files and history)
     messages_for_llm = context_manager.get_llm_payload(user_prompt=prompt)
-
-    # Create and start thinking indicator
-    indicator = ThinkingIndicator()
-    indicator.start()
     
-    # Call the core chat logic with the prepared messages
-    assistant_response_chunks = chat_completion(messages=messages_for_llm)
+    # Get the selected model from config
+    selected_model = config_manager.get_current_model()
+    
+    # Track timing
+    think_start = time.time()
+    think_time = None
+    stream_start = None
+    
+    # Call the core chat logic with the prepared messages and selected model
+    if selected_model:
+        assistant_response_chunks = chat_completion(messages=messages_for_llm, model=selected_model)
+    else:
+        assistant_response_chunks = chat_completion(messages=messages_for_llm)
 
     # Stream chunks and build full response
     full_response = ""
-    stream_start = None
-    think_time = None
     
-    for chunk in assistant_response_chunks:
-        if stream_start is None:
-            # First chunk received, stop thinking indicator
-            think_time = indicator.stop()
-            stream_start = time.time()
-            # Add thinking time to context
-            context_manager.add_message(
-                role="system", 
-                content=f"LLM thinking time: {think_time:.1f}s"
-            )
-        yield chunk # Yield chunks to the CLI for streaming display
-        full_response += chunk
+    if console:
+        # Use Rich console.status for thinking indicator
+        with console.status("Thinking...", spinner="dots"):
+            for chunk in assistant_response_chunks:
+                if stream_start is None:
+                    # First chunk received
+                    think_time = time.time() - think_start
+                    stream_start = time.time()
+                    # Add thinking time to context
+                    context_manager.add_message(
+                        role="system", 
+                        content=f"LLM thinking time: {think_time:.1f}s"
+                    )
+                    # Exit status context to stop spinner
+                    break
+            # Yield first chunk after spinner stops
+            if 'chunk' in locals():
+                yield chunk
+                full_response += chunk
+        
+        # Continue streaming remaining chunks
+        for chunk in assistant_response_chunks:
+            yield chunk
+            full_response += chunk
+    else:
+        # No console provided, stream without spinner
+        for chunk in assistant_response_chunks:
+            if stream_start is None:
+                think_time = time.time() - think_start
+                stream_start = time.time()
+                context_manager.add_message(
+                    role="system", 
+                    content=f"LLM thinking time: {think_time:.1f}s"
+                )
+            yield chunk
+            full_response += chunk
 
     # Calculate and yield stream time
     if stream_start:
@@ -73,6 +103,78 @@ def chat(prompt: str):
         context_manager.add_message(role="assistant", content=full_response)
     
     # log to temp file
+
+def search(query: str, console: Console = None):
+    """Performs a web search using a search-enabled model."""
+    # Add user prompt to global history first
+    context_manager.add_message(role="user", content=f"[Search Query] {query}")
+
+    # Get the messages list formatted for the LLM (includes files and history)
+    messages_for_llm = context_manager.get_llm_payload(user_prompt=query)
+    
+    # Track timing
+    think_start = time.time()
+    think_time = None
+    stream_start = None
+    
+    # Use a fixed search-enabled model
+    search_model = "openai/gpt-4o-mini"  # Fast and cost-effective
+    
+    # Call the core chat logic with search enabled
+    assistant_response_chunks = chat_completion(
+        messages=messages_for_llm, 
+        model=search_model,
+        enable_search=True
+    )
+
+    # Stream chunks and build full response
+    full_response = ""
+    
+    if console:
+        # Use Rich console.status for thinking indicator
+        with console.status("Searching...", spinner="dots"):
+            for chunk in assistant_response_chunks:
+                if stream_start is None:
+                    # First chunk received
+                    think_time = time.time() - think_start
+                    stream_start = time.time()
+                    # Add thinking time to context
+                    context_manager.add_message(
+                        role="system", 
+                        content=f"Web search thinking time: {think_time:.1f}s"
+                    )
+                    # Exit status context to stop spinner
+                    break
+            # Yield first chunk after spinner stops
+            if 'chunk' in locals():
+                yield chunk
+                full_response += chunk
+        
+        # Continue streaming remaining chunks
+        for chunk in assistant_response_chunks:
+            yield chunk
+            full_response += chunk
+    else:
+        # No console provided, stream without spinner
+        for chunk in assistant_response_chunks:
+            if stream_start is None:
+                think_time = time.time() - think_start
+                stream_start = time.time()
+                context_manager.add_message(
+                    role="system", 
+                    content=f"Web search thinking time: {think_time:.1f}s"
+                )
+            yield chunk
+            full_response += chunk
+
+    # Calculate and yield stream time
+    if stream_start:
+        stream_time = time.time() - stream_start
+        yield f"\n[dim](Search time: {think_time:.1f}s, Streaming: {stream_time:.1f}s)[/dim]"
+
+    # Add assistant response to global history after streaming is complete
+    if full_response:
+        context_manager.add_message(role="assistant", content=f"[Search Result] {full_response}")
 
 def add_item(item: str | Path, *, show_user: bool = False):
     """Adds text content or file content to the context's known items."""
