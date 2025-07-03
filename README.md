@@ -2,8 +2,7 @@
 
 **"Abandon vibe coding—embrace AI engineering."**
 
-AI-OS is an AI operating system—not a monolithic framework. Software is meant to be rewritten: AI-OS is a tiny core shell you fork, extend, and discard without regret.
-
+AI-OS is an AI operating system—not a monolithic framework.  AI-OS is a tiny core lib and chat UI to allow you to quickly write small lean agentic macros.
 
 Agents are for the common folk, macros are for the nerds.
 
