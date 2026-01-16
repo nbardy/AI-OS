@@ -23,6 +23,8 @@ __all__ = [
     "log", "log_to_context",
     # LLM Operations
     "chat", "chat_json", "vision", "edit",
+    # Parallel Execution
+    "spawn", "join", "gather",
     # File Operations
     "read", "write", "exists",
     # Shell
@@ -84,6 +86,16 @@ def chat(
     """
     Send a prompt to Claude via Claude Code.
 
+    CRITICAL: This is the primary LLM interface for macros. It wraps
+    ClaudeOrchestrator.chat() and handles context file injection automatically.
+
+    The async_ parameter enables PARALLEL LLM calls for 3x+ speedup on multi-task
+    workflows. See examples/tree_of_thought.py for proper usage pattern.
+
+    IMPORTANT: When async_=False (default), this function BLOCKS until response
+    is complete. When async_=True, it returns a coroutine that must be awaited
+    with asyncio.gather() or similar.
+
     Args:
         prompt: The prompt to send
         include_context: If True (default), includes conversation history
@@ -95,10 +107,10 @@ def chat(
         Response string, or coroutine if async_=True
 
     Example:
-        # Sync (default)
+        # Sync (default) - blocks until complete
         response = ah.chat("What is 2+2?")
 
-        # Async (for parallel execution)
+        # Async (for parallel execution) - enables 3x+ speedup
         results = await asyncio.gather(
             ah.chat("prompt 1", async_=True),
             ah.chat("prompt 2", async_=True),
@@ -185,6 +197,84 @@ def patch(plan: str, user_approval: bool = True) -> Dict[str, Any] | None:
         "summary": "Edit completed" if success else "Edit failed",
         "files": []
     }
+
+
+# ------------------------------------------------------------------ #
+# Parallel Execution
+# ------------------------------------------------------------------ #
+
+def spawn(prompt: str, output_file: str = None, model: str = None, **kwargs):
+    """
+    Spawn an async Claude process for parallel execution.
+
+    Args:
+        prompt: The task prompt
+        output_file: Optional file to write result to
+        model: Model override (sonnet, opus, haiku)
+        **kwargs: Additional arguments passed to chat
+
+    Returns:
+        SpawnedAgent handle that can be passed to join()
+
+    Example:
+        # Spawn multiple agents
+        agents = [
+            ah.spawn(f"Generate idea {i}", output_file=f"idea_{i}.txt")
+            for i in range(5)
+        ]
+        # Wait for all to complete
+        results = ah.join(agents)
+    """
+    return _require_runner().spawn(prompt, output_file=output_file, model=model, **kwargs)
+
+
+def join(agents: List, timeout: float = None) -> List:
+    """
+    Wait for spawned agents to complete.
+
+    Args:
+        agents: List of SpawnedAgent from spawn()
+        timeout: Optional timeout in seconds
+
+    Returns:
+        List of ClaudeResult objects with success, result, error fields
+
+    Example:
+        agents = [ah.spawn(f"Task {i}") for i in range(3)]
+        results = ah.join(agents)
+        for r in results:
+            if r.success:
+                print(r.result)
+            else:
+                print(f"Failed: {r.error}")
+    """
+    return _require_runner().join(agents, timeout=timeout)
+
+
+def gather(*prompts: str, model: str = None, **kwargs) -> List[str]:
+    """
+    Run multiple prompts in parallel and return results.
+
+    This is a convenience wrapper around spawn/join.
+
+    Args:
+        *prompts: Variable number of prompts to run
+        model: Model override (applies to all)
+        **kwargs: Additional arguments passed to each chat
+
+    Returns:
+        List of response strings in the same order as prompts
+
+    Example:
+        results = ah.gather(
+            "Generate idea 1",
+            "Generate idea 2",
+            "Generate idea 3",
+            model="haiku"
+        )
+        # results is a list of 3 strings
+    """
+    return _require_runner().gather(*prompts, model=model, **kwargs)
 
 
 # ------------------------------------------------------------------ #

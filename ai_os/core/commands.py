@@ -58,7 +58,10 @@ Just answer the user's question or discuss the topic."""
     orch = get_orchestrator()
 
     try:
-        # Create generator once to avoid double execution
+        # CRITICAL: Create generator once to avoid double execution
+        # BUG FIX: Previously called chat_streaming() twice causing duplicate API calls
+        # SOLUTION: Create once, use next() for first chunk, iterate same generator
+        # MAINTENANCE: Never call chat_streaming() multiple times with same prompt
         stream_gen = orch.chat_streaming(prompt, system_instruction=system_instruction)
         first_chunk = None
 

@@ -2,11 +2,27 @@
 
 **"Abandon vibe coding—embrace AI engineering."**
 
-AI-OS is an AI operating system—not a monolithic framework.  AI-OS is a tiny core lib and chat UI to allow you to quickly write small lean agentic macros.
+AI-OS is an AI operating system—not a monolithic framework. AI-OS is a tiny core lib and chat UI to allow you to quickly write small lean agentic macros.
 
 Agents are for the common folk, macros are for the nerds.
 
 LLM tooling can make us better engineers, not worse.
+
+---
+
+## 🆕 AI-OS v2 - Claude Code Native
+
+**NEW:** AI-OS v2 now uses [Claude Code](https://claude.ai/claude-code) as its execution backend instead of OpenRouter. This means:
+
+✅ **Native tool use** - Claude Code's Edit, Read, Write, Bash tools work out of the box
+✅ **Better file editing** - Surgical edits with diff handling and conflict detection
+✅ **True async** - Parallel LLM calls with `async_=True` and `asyncio.gather()`
+✅ **Vision support** - Image analysis with `ah.vision()`
+✅ **75% less code** - Deleted 2000+ lines of XML parsing, replaced with clean orchestration
+
+See [V2_MIGRATION_COMPLETE.md](./V2_MIGRATION_COMPLETE.md) for full details.
+
+---
 
 
 ## What can you do with AI-OS
@@ -44,10 +60,66 @@ In the future AI-OS will have a growing standard lib that impliments inference t
 
 ## Quick Install
 
+**Requirements:**
+- Python ≥ 3.11
+- [Claude Code CLI](https://claude.ai/claude-code) installed and configured
+
 ```bash
-pip install ai-os           # Python ≥ 3.11
-export OPENROUTER_API_KEY=sk-…
-aios                        # launch the AI-OS shell
+# Install Claude Code first
+# See: https://docs.anthropic.com/en/docs/claude-code
+
+# Install AI-OS
+pip install ai-os           # or: uv pip install ai-os
+
+# Launch the AI-OS shell
+aios
+```
+
+**Note:** v2 uses Claude Code as the backend. No API keys needed - Claude Code handles authentication.
+
+---
+
+## v2 API Quick Reference
+
+```python
+import ai_os as ai  # Clean top-level import
+import asyncio
+
+# Basic chat
+response = ai.chat("What is 2+2?")
+
+# JSON output
+data = ai.chat_json("Return JSON: {\"answer\": 42}")
+
+# Vision/image analysis
+analysis = ai.vision("Describe this chart", "chart.png")
+
+# Edit files (uses Claude Code's Edit tool)
+ai.edit("Add a comment to the main function in app.py")
+
+# Parallel execution (NEW in v2!)
+results = await asyncio.gather(
+    ai.chat("Analyze approach A", async_=True),
+    ai.chat("Analyze approach B", async_=True),
+    ai.chat("Analyze approach C", async_=True),
+)
+
+# File operations
+content = ai.read("file.txt")
+ai.write("output.txt", "content")
+exists = ai.exists("file.txt")
+
+# Shell commands
+exit_code = ai.shell("pytest tests/")
+output = ai.shell("git status", capture=True)
+
+# User interaction
+if ai.approve("Continue with deployment?"):
+    ai.log("Deploying...")
+
+# Cost tracking
+cost = ai.get_cost()
+ai.log(f"Total: ${cost['total_cost_usd']:.4f}")
 ```
 
 ---

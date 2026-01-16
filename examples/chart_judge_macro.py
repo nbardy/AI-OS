@@ -2,14 +2,14 @@
 """
 Chart Judge Macro - Draw chart, have Claude judge quality.
 
-V2: Uses Claude Code via ah.vision() instead of OpenRouter.
+V2: Uses Claude Code via ai.vision() instead of OpenRouter.
 
 Usage:
     /macro examples/chart_judge_macro.py
 """
 
 import matplotlib.pyplot as plt
-import ai_os.core.macro_helpers as ah
+import ai_os as ai
 
 
 def draw_chart() -> str:
@@ -45,15 +45,15 @@ def main(ctx, **kwargs):
     """
     Chart Judge macro - generates a chart and has Claude judge it.
     """
-    ah.log("[bold]Chart Judge Macro[/bold]")
+    ai.log("[bold]Chart Judge Macro[/bold]")
 
     # Generate chart
-    ah.log("[cyan]Generating sample chart...[/cyan]")
+    ai.log("[cyan]Generating sample chart...[/cyan]")
     chart_path = draw_chart()
-    ah.log(f"[green]Chart saved: {chart_path}[/green]")
+    ai.log(f"[green]Chart saved: {chart_path}[/green]")
 
     # Have Claude judge the chart using vision
-    ah.log("[cyan]Asking Claude to judge the chart...[/cyan]")
+    ai.log("[cyan]Asking Claude to judge the chart...[/cyan]")
 
     judge_prompt = """Rate this business chart (1-10) on:
     - Clarity: Is the data easy to understand?
@@ -62,11 +62,11 @@ def main(ctx, **kwargs):
 
     Be critical and explain your ratings."""
 
-    response = ah.vision(judge_prompt, chart_path)
+    response = ai.vision(judge_prompt, chart_path)
 
-    ah.log("\n[bold green]Chart Judge Says:[/bold green]")
-    ah.log(response)
+    ai.log("\n[bold green]Chart Judge Says:[/bold green]")
+    ai.log(response)
 
     # Show cost
-    cost = ah.get_cost()
-    ah.log(f"\n[dim]Total cost: ${cost['total_cost_usd']:.4f}[/dim]")
+    cost = ai.get_cost()
+    ai.log(f"\n[dim]Total cost: ${cost['total_cost_usd']:.4f}[/dim]")

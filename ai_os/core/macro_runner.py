@@ -331,3 +331,27 @@ class MacroRunner:
     def get_cost(self) -> Dict[str, Any]:
         """Get accumulated cost for this macro run."""
         return self.orchestrator.get_cost()
+
+    # -------------------------------------------------------------------------
+    # Parallel Execution (spawn/join/gather)
+    # -------------------------------------------------------------------------
+
+    def spawn(self, prompt: str, output_file: str = None, model: str = None, **kwargs):
+        """Spawn an async Claude process."""
+        self.console.print(f"[dim]Spawning agent: {prompt[:60]}{'...' if len(prompt) > 60 else ''}[/dim]")
+        return self.orchestrator.spawn(prompt, output_file=output_file, model=model, **kwargs)
+
+    def join(self, agents, timeout: float = None):
+        """Wait for spawned agents to complete."""
+        self.console.print(f"[dim]Joining {len(agents)} agents...[/dim]")
+        results = self.orchestrator.join(agents, timeout=timeout)
+        successful = sum(1 for r in results if r.success)
+        self.console.print(f"[dim]{successful}/{len(agents)} agents completed successfully[/dim]")
+        return results
+
+    def gather(self, *prompts: str, model: str = None, **kwargs):
+        """Run multiple prompts in parallel."""
+        self.console.print(f"[dim]Running {len(prompts)} prompts in parallel...[/dim]")
+        results = self.orchestrator.gather(*prompts, model=model, **kwargs)
+        self.console.print(f"[dim]Gathered {len(results)} results[/dim]")
+        return results

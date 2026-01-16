@@ -10,12 +10,12 @@ import json
 import os
 import re
 import asyncio
+import uuid
+from concurrent.futures import ThreadPoolExecutor, Future
+from threading import Lock
 from typing import Any, Dict, List, Optional, Generator, Union
 from dataclasses import dataclass, field
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, Future
-from threading import Lock
-import uuid
 
 
 @dataclass
@@ -42,16 +42,36 @@ def _find_claude_command() -> List[str]:
     Find the Claude Code CLI command.
 
     Tries in order:
-    1. Direct 'claude' binary (if installed globally)
-    2. npx @anthropic-ai/claude-code (npm install)
+    1. Use 'where claude' on Unix systems to find the real path (handles aliases)
+    2. Direct 'claude' binary (if installed globally)
+    3. npx @anthropic-ai/claude-code (npm install)
 
     Returns the command as a list for subprocess.
     """
     import shutil
+    import platform
 
-    # Try direct claude binary first
-    if shutil.which("claude"):
-        return ["claude"]
+    # Try using 'where' command on Unix systems to get the real path
+    # This handles shell aliases properly
+    if platform.system() != "Windows":
+        try:
+            result = subprocess.run(
+                ["zsh", "-c", "where claude 2>/dev/null | grep -v alias | head -1"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                claude_path = result.stdout.strip()
+                if os.path.exists(claude_path):
+                    return [claude_path]
+        except Exception:
+            pass
+
+    # Try direct claude binary with which
+    claude_path = shutil.which("claude")
+    if claude_path and os.path.exists(claude_path):
+        return [claude_path]
 
     # Fall back to npx
     if shutil.which("npx"):
@@ -77,7 +97,14 @@ class ClaudeOrchestrator:
         timeout: int = 600,
         skip_permissions: bool = True
     ):
-        self.working_dir = working_dir or os.getcwd()
+        if working_dir:
+            self.working_dir = working_dir
+        else:
+            try:
+                self.working_dir = os.getcwd()
+            except (FileNotFoundError, OSError):
+                # Fallback to home directory if cwd doesn't exist
+                self.working_dir = str(Path.home())
         self.default_model = default_model
         self.timeout = timeout
         self.skip_permissions = skip_permissions
@@ -126,10 +153,30 @@ class ClaudeOrchestrator:
         context_files: List[str] = None,
         system_instruction: str = None
     ) -> str:
-        """Synchronous chat - blocks until response."""
+        """
+        Synchronous chat - blocks until response.
+
+        ARCHITECTURE NOTE:
+        This is the core integration point between AI-OS and Claude Code.
+        Each call runs `claude -p` as a subprocess with --output-format json.
+
+        IMPORTANT:
+        - Each call is stateless (Claude Code starts fresh)
+        - Context must be provided in the prompt
+        - Cost tracking only works with JSON output
+        - CANNOT be tested by running `claude -p` within Claude Code (infinite recursion)
+
+        MAINTENANCE:
+        - If Claude Code CLI changes JSON format, update parsing here
+        - --dangerously-skip-permissions needed for macro automation
+        - Default timeout is 600s, adjust if operations take longer
+        """
         full_prompt = self._build_prompt(prompt, context_files, system_instruction)
         model = model or self.default_model
 
+        # CRITICAL: Build Claude Code command with JSON output for structured responses
+        # --output-format json enables cost tracking and proper error handling
+        # This is the core integration point between AI-OS and Claude Code CLI
         cmd = self._claude_cmd + ["-p", "--model", model]
         if self.skip_permissions:
             cmd.append("--dangerously-skip-permissions")
@@ -263,16 +310,24 @@ class ClaudeOrchestrator:
         return self._parse_json(response)
 
     def _parse_json(self, response: str) -> Any:
-        """Extract JSON from response text."""
+        """Extract JSON from response text.
+
+        IMPORTANT: Handles cases where Claude includes markdown formatting
+        around JSON (e.g., ```json ... ```). Tries direct parse first,
+        then falls back to regex extraction.
+
+        This is critical for chat_json() to work reliably across different
+        Claude responses that may include explanatory text.
+        """
         response = response.strip()
 
-        # Try direct parse first
+        # Try direct parse first (fastest path)
         try:
             return json.loads(response)
         except json.JSONDecodeError:
             pass
 
-        # Try to find JSON object or array in response
+        # Fallback: Find JSON object or array in response with regex
         match = re.search(r'(\{[\s\S]*\}|\[[\s\S]*\])', response)
         if match:
             try:

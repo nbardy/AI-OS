@@ -10,7 +10,7 @@ Usage:
     /macro examples/tdd_macro.py test_goal="implement a function that checks if a number is prime"
 """
 
-import ai_os.core.macro_helpers as ah
+import ai_os as ai
 import re
 import os
 
@@ -54,17 +54,17 @@ def main(ctx, **kwargs):
     """
     goal = kwargs.get("test_goal")
     if not goal:
-        ah.log("[red]Error: test_goal argument is required.[/red]")
-        ah.log("Usage: /macro examples/tdd_macro.py test_goal='...'")
+        ai.log("[red]Error: test_goal argument is required.[/red]")
+        ai.log("Usage: /macro examples/tdd_macro.py test_goal='...'")
         return
 
     max_attempts = int(kwargs.get("max_attempts", 5))
     test_goal_snake = re.sub(r'[^a-zA-Z0-9]+', '_', goal).strip('_').lower()
 
-    ah.log(f"[bold]TDD Macro: {goal}[/bold]")
+    ai.log(f"[bold]TDD Macro: {goal}[/bold]")
 
     # --- Phase 1: Generate Test File ---
-    ah.log("\n[cyan]Phase 1: Generating test file...[/cyan]")
+    ai.log("\n[cyan]Phase 1: Generating test file...[/cyan]")
 
     test_prompt = TEST_PROMPT_TEMPLATE.format(
         test_goal=goal,
@@ -72,35 +72,35 @@ def main(ctx, **kwargs):
     )
 
     # Have Claude create the test file using edit
-    ah.edit(test_prompt)
+    ai.edit(test_prompt)
 
     # Find the test file
     test_file = f"tests/test_{test_goal_snake}.py"
 
-    if not ah.exists(test_file):
-        ah.log(f"[red]Test file {test_file} was not created[/red]")
+    if not ai.exists(test_file):
+        ai.log(f"[red]Test file {test_file} was not created[/red]")
         return
 
-    ah.log(f"[green]Test file created: {test_file}[/green]")
+    ai.log(f"[green]Test file created: {test_file}[/green]")
 
     # Show test content and get approval
-    test_contents = ah.read(test_file)
-    ah.log(f"[dim]Test contents:\n{test_contents[:500]}...[/dim]")
+    test_contents = ai.read(test_file)
+    ai.log(f"[dim]Test contents:\n{test_contents[:500]}...[/dim]")
 
-    if not ah.approve(f"Test file {test_file} created. Continue with implementation?"):
-        ah.log("[yellow]Cancelled by user[/yellow]")
+    if not ai.approve(f"Test file {test_file} created. Continue with implementation?"):
+        ai.log("[yellow]Cancelled by user[/yellow]")
         return
 
     # --- Phase 2: Implementation Loop ---
-    ah.log("\n[cyan]Phase 2: Implementation loop[/cyan]")
+    ai.log("\n[cyan]Phase 2: Implementation loop[/cyan]")
 
     test_command = f"pytest {test_file} -v"
 
     for attempt in range(1, max_attempts + 1):
-        ah.log(f"\n[bold]Attempt {attempt}/{max_attempts}[/bold]")
+        ai.log(f"\n[bold]Attempt {attempt}/{max_attempts}[/bold]")
 
         # Get current test file contents
-        test_file_contents = ah.read(test_file)
+        test_file_contents = ai.read(test_file)
 
         # Generate implementation
         impl_prompt = IMPLEMENTATION_PROMPT_TEMPLATE.format(
@@ -108,24 +108,24 @@ def main(ctx, **kwargs):
             test_file_contents=test_file_contents
         )
 
-        ah.log("[dim]Generating implementation...[/dim]")
-        ah.edit(impl_prompt)
+        ai.log("[dim]Generating implementation...[/dim]")
+        ai.edit(impl_prompt)
 
         # Run tests
-        ah.log(f"[dim]Running: {test_command}[/dim]")
-        exit_code = ah.shell(test_command)
+        ai.log(f"[dim]Running: {test_command}[/dim]")
+        exit_code = ai.shell(test_command)
 
         if exit_code == 0:
-            ah.log("\n[bold green]Tests passed! TDD cycle complete.[/bold green]")
+            ai.log("\n[bold green]Tests passed! TDD cycle complete.[/bold green]")
             return
 
-        ah.log(f"[yellow]Tests failed (exit code: {exit_code})[/yellow]")
+        ai.log(f"[yellow]Tests failed (exit code: {exit_code})[/yellow]")
 
         if attempt < max_attempts:
-            if not ah.approve("Retry with another implementation?"):
-                ah.log("[yellow]Cancelled by user[/yellow]")
+            if not ai.approve("Retry with another implementation?"):
+                ai.log("[yellow]Cancelled by user[/yellow]")
                 return
         else:
-            ah.log(f"[red]Max attempts ({max_attempts}) reached. Tests still failing.[/red]")
+            ai.log(f"[red]Max attempts ({max_attempts}) reached. Tests still failing.[/red]")
 
-    ah.log("[red]TDD macro completed without passing tests.[/red]")
+    ai.log("[red]TDD macro completed without passing tests.[/red]")
