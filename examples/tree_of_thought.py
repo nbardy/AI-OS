@@ -11,6 +11,7 @@ Usage:
 """
 
 import ai_os.core.macro_helpers as ah
+import ai_os as ai
 
 INITIAL_THOUGHT_PROMPT = """You are part of a brainstorming team. Based on the following problem, generate an insightful and creative approach, idea, or step.
 Problem: {problem}
@@ -30,26 +31,6 @@ Thoughts:
 
 Your Synthesis:
 """
-
-
-def get_initial_thoughts(problem: str, num_thoughts: int = 5) -> list:
-    """Generate initial thoughts in parallel using gather()."""
-    prompts = [
-        INITIAL_THOUGHT_PROMPT.format(problem=problem, n=i+1)
-        for i in range(num_thoughts)
-    ]
-    return ah.gather(*prompts, model="haiku")
-
-
-def get_branch_thoughts(initial_thoughts: list, branches_per: int = 3) -> list:
-    """Branch each initial thought in parallel using gather()."""
-    prompts = []
-    for i, thought in enumerate(initial_thoughts):
-        for j in range(branches_per):
-            prompts.append(
-                BRANCH_PROMPT.format(thought=thought, n=j+1)
-            )
-    return ah.gather(*prompts, model="haiku")
 
 
 def main(ctx, **kwargs):
@@ -81,7 +62,11 @@ def main(ctx, **kwargs):
 
     # Phase 1: Generate initial thoughts in parallel
     ah.log(f"\n[cyan]Phase 1: Generating {num_thoughts} initial thoughts...[/cyan]")
-    initial_thoughts = get_initial_thoughts(problem, num_thoughts)
+    prompts = [
+        INITIAL_THOUGHT_PROMPT.format(problem=problem, n=i+1)
+        for i in range(num_thoughts)
+    ]
+    initial_thoughts = ai.gather(*prompts, model="haiku")
     ah.log(f"[green]Generated {len(initial_thoughts)} initial thoughts[/green]")
 
     for i, thought in enumerate(initial_thoughts):
@@ -90,7 +75,15 @@ def main(ctx, **kwargs):
     # Phase 2: Branch each thought in parallel
     total_branches = num_thoughts * branches_per
     ah.log(f"\n[cyan]Phase 2: Branching into {total_branches} sub-thoughts...[/cyan]")
-    branch_thoughts = get_branch_thoughts(initial_thoughts, branches_per)
+
+    branch_prompts = []
+    for i, thought in enumerate(initial_thoughts):
+        for j in range(branches_per):
+            branch_prompts.append(
+                BRANCH_PROMPT.format(thought=thought, n=j+1)
+            )
+
+    branch_thoughts = ai.gather(*branch_prompts, model="haiku")
     ah.log(f"[green]Generated {len(branch_thoughts)} branch thoughts[/green]")
 
     # Phase 3: Synthesize all thoughts
