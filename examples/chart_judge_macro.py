@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
-"""Dense macro: Draw chart → VLLM judges quality"""
+"""
+Chart Judge Macro - Draw chart, have Claude judge quality.
+
+V2: Uses Claude Code via ah.vision() instead of OpenRouter.
+
+Usage:
+    /macro examples/chart_judge_macro.py
+"""
 
 import matplotlib.pyplot as plt
-import numpy as np
-import base64
-from io import BytesIO
-from ai_os.core.models import Message, TextContent, ImageContent
-from ai_os.core.chat import chat_completion
+import ai_os.core.macro_helpers as ah
 
-# 1. Generate & save chart
-def draw_chart():
+
+def draw_chart() -> str:
+    """Generate sample chart and save to file."""
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
-    
+
     # Sales trend
     months = ['Jan', 'Feb', 'Mar', 'Apr', 'May']
     sales = [120, 135, 125, 145, 160]
@@ -19,43 +23,50 @@ def draw_chart():
     ax1.set_title('Q1 Sales Trend', fontsize=14, fontweight='bold')
     ax1.set_ylabel('Sales ($k)')
     ax1.grid(True, alpha=0.3)
-    
+
     # Market share
     companies = ['Us', 'CompA', 'CompB', 'Other']
     shares = [35, 25, 20, 20]
     colors = ['#2ecc71', '#3498db', '#e74c3c', '#95a5a6']
     ax2.pie(shares, labels=companies, colors=colors, autopct='%1.1f%%', startangle=90)
     ax2.set_title('Market Share', fontsize=14, fontweight='bold')
-    
+
     plt.tight_layout()
-    
-    # Save to base64
-    buf = BytesIO()
-    plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
-    buf.seek(0)
+
+    # Save to file (Claude Code can read image files)
+    chart_path = "chart_to_judge.png"
+    plt.savefig(chart_path, format='png', dpi=150, bbox_inches='tight')
     plt.close()
-    
-    return base64.b64encode(buf.getvalue()).decode('utf-8')
 
-# 2. VLLM as judge
-def judge_chart(chart_b64):
-    messages = [
-        Message(
-            role="user",
-            content=[
-                TextContent(type="text", text="Rate this business chart (1-10) on: clarity, professionalism, and insight value. Be critical."),
-                ImageContent(type="image_url", image_url={"url": f"data:image/png;base64,{chart_b64}"})
-            ]
-        )
-    ]
-    
-    print("📊 Chart created. VLLM Judge says:\n")
-    
-    # Use a vision-capable model for judging
-    for chunk in chat_completion(messages, model="openai/gpt-4-vision-preview"):
-        print(chunk, end='', flush=True)
+    return chart_path
 
-# Run macro
-if __name__ == "__main__":
-    chart_b64 = draw_chart()
-    judge_chart(chart_b64)
+
+def main(ctx, **kwargs):
+    """
+    Chart Judge macro - generates a chart and has Claude judge it.
+    """
+    ah.log("[bold]Chart Judge Macro[/bold]")
+
+    # Generate chart
+    ah.log("[cyan]Generating sample chart...[/cyan]")
+    chart_path = draw_chart()
+    ah.log(f"[green]Chart saved: {chart_path}[/green]")
+
+    # Have Claude judge the chart using vision
+    ah.log("[cyan]Asking Claude to judge the chart...[/cyan]")
+
+    judge_prompt = """Rate this business chart (1-10) on:
+    - Clarity: Is the data easy to understand?
+    - Professionalism: Does it look polished?
+    - Insight value: Does it convey useful information?
+
+    Be critical and explain your ratings."""
+
+    response = ah.vision(judge_prompt, chart_path)
+
+    ah.log("\n[bold green]Chart Judge Says:[/bold green]")
+    ah.log(response)
+
+    # Show cost
+    cost = ah.get_cost()
+    ah.log(f"\n[dim]Total cost: ${cost['total_cost_usd']:.4f}[/dim]")

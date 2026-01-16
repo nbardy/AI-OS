@@ -1,205 +1,97 @@
-#!/usr/bin/env python3
+# examples/vision_demo.py
 """
-Example of using OpenRouter with images via OpenAI-compatible format.
+Vision Demo Macro - Demonstrates image analysis with Claude Code.
 
-This demonstrates how to:
-1. Send images as base64-encoded data
-2. Send images as URLs
-3. Mix text and images in conversations
+V2: Uses Claude Code's native vision capability via ah.vision().
+
+Usage:
+    /macro examples/openrouter_image_chat.py
+    /macro examples/openrouter_image_chat.py image_path="/path/to/image.png"
 """
 
-import os
-import base64
-import httpx
 from pathlib import Path
-from ai_os.core.models import Message, TextContent, ImageContent
-from ai_os.core.chat import chat_completion
+import ai_os.core.macro_helpers as ah
 
 
-def encode_image(image_path: str) -> str:
-    """Encode image file to base64 string"""
-    with open(image_path, "rb") as f:
-        return base64.b64encode(f.read()).decode('utf-8')
+def main(ctx, **kwargs):
+    """
+    Vision demo macro - shows how to analyze images with Claude.
 
+    Args:
+        image_path: Optional path to an image file to analyze
+    """
+    ah.log("[bold]Vision Demo - Image Analysis with Claude Code[/bold]\n")
 
-def example_base64_image():
-    """Example: Send a local image as base64 to OpenRouter"""
-    print("=== Example 1: Base64 Image ===")
-    
-    # For demo, we'll create a simple test image
-    # In real use, you'd load an actual image file
-    image_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
-    
-    messages = [
-        Message(
-            role="user",
-            content=[
-                TextContent(type="text", text="What do you see in this image?"),
-                ImageContent(
-                    type="image_url",
-                    image_url={"url": f"data:image/png;base64,{image_base64}"}
-                )
-            ]
+    image_path = kwargs.get("image_path")
+
+    if image_path:
+        # Analyze user-provided image
+        ah.log(f"[cyan]Analyzing image: {image_path}[/cyan]")
+
+        if not Path(image_path).exists():
+            ah.log(f"[red]Image file not found: {image_path}[/red]")
+            return
+
+        response = ah.vision(
+            "Please analyze this image in detail. Describe what you see.",
+            image_path
         )
-    ]
-    
-    # Use a vision-capable model
-    model = "openai/gpt-4-vision-preview"
-    
-    print(f"Sending image to {model}...")
-    for chunk in chat_completion(messages, model=model):
-        print(chunk, end='', flush=True)
-    print("\n")
+        ah.log(f"\n[green]Analysis:[/green]\n{response}")
 
+    else:
+        # Demo mode - create a simple test chart
+        ah.log("[cyan]Demo mode: Creating a test chart to analyze...[/cyan]")
 
-def example_url_image():
-    """Example: Send an image URL to OpenRouter"""
-    print("=== Example 2: URL Image ===")
-    
-    messages = [
-        Message(
-            role="user",
-            content=[
-                TextContent(type="text", text="Can you describe this chart?"),
-                ImageContent(
-                    type="image_url",
-                    image_url={"url": "https://example.com/chart.png"}
-                )
-            ]
+        # Generate a simple matplotlib chart
+        chart_code = '''
+import matplotlib.pyplot as plt
+
+# Simple demo chart
+fig, ax = plt.subplots(figsize=(8, 6))
+months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun']
+values = [65, 70, 85, 80, 90, 95]
+ax.bar(months, values, color='steelblue')
+ax.set_title('Monthly Performance')
+ax.set_ylabel('Score')
+ax.set_xlabel('Month')
+plt.savefig('demo_chart.png', dpi=100, bbox_inches='tight')
+plt.close()
+print('Chart saved to demo_chart.png')
+'''
+
+        ah.write("_chart_gen_temp.py", chart_code)
+        exit_code = ah.shell("python _chart_gen_temp.py")
+
+        if exit_code != 0:
+            ah.log("[red]Failed to generate demo chart[/red]")
+            return
+
+        ah.log("[green]Demo chart created![/green]\n")
+
+        # Analyze the chart
+        ah.log("[cyan]Asking Claude to analyze the chart...[/cyan]\n")
+
+        response = ah.vision(
+            """Analyze this chart:
+1. What type of chart is this?
+2. What does it show?
+3. What trends do you notice?
+4. Rate the visual quality (1-10)""",
+            "demo_chart.png"
         )
-    ]
-    
-    model = "anthropic/claude-3-opus"  # Claude 3 also supports vision
-    
-    print(f"Sending image URL to {model}...")
-    for chunk in chat_completion(messages, model=model):
-        print(chunk, end='', flush=True)
-    print("\n")
+
+        ah.log(f"[green]Claude's Analysis:[/green]\n{response}")
+
+        # Cleanup
+        ah.shell("rm -f _chart_gen_temp.py")
+
+    # Show cost
+    cost = ah.get_cost()
+    ah.log(f"\n[dim]Total cost: ${cost['total_cost_usd']:.4f}[/dim]")
 
 
-def example_multiple_images():
-    """Example: Send multiple images in one message"""
-    print("=== Example 3: Multiple Images ===")
-    
-    messages = [
-        Message(
-            role="user",
-            content=[
-                TextContent(type="text", text="Compare these two images:"),
-                ImageContent(
-                    type="image_url",
-                    image_url={"url": "https://example.com/image1.jpg"}
-                ),
-                ImageContent(
-                    type="image_url",
-                    image_url={"url": "https://example.com/image2.jpg"}
-                ),
-                TextContent(type="text", text="What are the main differences?")
-            ]
-        )
-    ]
-    
-    model = "openai/gpt-4-vision-preview"
-    
-    print(f"Sending multiple images to {model}...")
-    for chunk in chat_completion(messages, model=model):
-        print(chunk, end='', flush=True)
-    print("\n")
-
-
-def example_conversation_with_images():
-    """Example: Multi-turn conversation with images"""
-    print("=== Example 4: Conversation with Images ===")
-    
-    messages = [
-        Message(role="system", content="You are a helpful image analysis assistant."),
-        Message(
-            role="user",
-            content=[
-                TextContent(type="text", text="I'm going to show you some images. First, what's this?"),
-                ImageContent(
-                    type="image_url",
-                    image_url={"url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="}
-                )
-            ]
-        ),
-        Message(role="assistant", content="This appears to be a very small image, possibly a single pixel or a placeholder image. The base64 data suggests it's a minimal PNG file."),
-        Message(role="user", content="Good observation! Can you tell me more about the PNG format?")
-    ]
-    
-    model = "openai/gpt-4-vision-preview"
-    
-    print(f"Continuing conversation with {model}...")
-    for chunk in chat_completion(messages, model=model):
-        print(chunk, end='', flush=True)
-    print("\n")
-
-
-def example_with_local_file(image_path: str):
-    """Example: Load and send a local image file"""
-    print(f"=== Example 5: Local File: {image_path} ===")
-    
-    if not Path(image_path).exists():
-        print(f"Image file not found: {image_path}")
-        return
-    
-    # Encode the image
-    image_base64 = encode_image(image_path)
-    
-    # Detect image format from extension
-    ext = Path(image_path).suffix.lower()
-    mime_type = {
-        '.jpg': 'image/jpeg',
-        '.jpeg': 'image/jpeg', 
-        '.png': 'image/png',
-        '.gif': 'image/gif',
-        '.webp': 'image/webp'
-    }.get(ext, 'image/jpeg')
-    
-    messages = [
-        Message(
-            role="user",
-            content=[
-                TextContent(type="text", text="Please analyze this image in detail:"),
-                ImageContent(
-                    type="image_url",
-                    image_url={"url": f"data:{mime_type};base64,{image_base64}"}
-                )
-            ]
-        )
-    ]
-    
-    model = "openai/gpt-4-vision-preview"
-    
-    print(f"Sending {image_path} to {model}...")
-    for chunk in chat_completion(messages, model=model):
-        print(chunk, end='', flush=True)
-    print("\n")
-
-
-if __name__ == "__main__":
-    # Check for API key
-    if not os.environ.get("OPENROUTER_API_KEY"):
-        print("Error: Please set OPENROUTER_API_KEY environment variable")
-        print("Get your API key from: https://openrouter.ai/keys")
-        exit(1)
-    
-    # Run examples
-    try:
-        example_base64_image()
-        example_url_image()
-        example_multiple_images()
-        example_conversation_with_images()
-        
-        # If you have a local image file, uncomment and modify:
-        # example_with_local_file("/path/to/your/image.jpg")
-        
-    except Exception as e:
-        print(f"Error: {e}")
-    
-    print("\nNote: Vision support depends on the model. Models that support images include:")
-    print("- openai/gpt-4-vision-preview")
-    print("- anthropic/claude-3-opus")
-    print("- anthropic/claude-3-sonnet")
-    print("- google/gemini-pro-vision")
-    print("\nCheck OpenRouter docs for the latest vision-capable models.")
+# Note: This script is designed to be run as a macro:
+#   /macro examples/openrouter_image_chat.py
+#
+# Claude Code natively supports vision - just pass an image path to ah.vision()
+# Claude will read the image file directly using its Read tool.
