@@ -65,6 +65,11 @@ class TestOrchestrator:
 class TestDSL:
     """Test the DSL API."""
 
+    def setup_method(self):
+        """Reset orchestrator before each test."""
+        from ai_os.core.orchestrator import reset_orchestrator
+        reset_orchestrator()
+
     def test_log(self, capsys):
         """Test logging."""
         ai.log("test message")
@@ -128,6 +133,11 @@ class TestDSL:
 
 class TestIntegration:
     """Integration tests simulating macro usage."""
+
+    def setup_method(self):
+        """Reset orchestrator before each test."""
+        from ai_os.core.orchestrator import reset_orchestrator
+        reset_orchestrator()
 
     def test_simple_macro_flow(self):
         """Test a simple macro-like flow."""

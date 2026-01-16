@@ -20,7 +20,10 @@ LLM tooling can make us better engineers, not worse.
 ✅ **Vision support** - Image analysis with `ah.vision()`
 ✅ **75% less code** - Deleted 2000+ lines of XML parsing, replaced with clean orchestration
 
-See [V2_MIGRATION_COMPLETE.md](./V2_MIGRATION_COMPLETE.md) for full details.
+**Documentation:**
+- 📖 [MIGRATION.md](./MIGRATION.md) - v1 to v2 migration guide
+- 🏗️ [ARCHITECTURE.md](./ARCHITECTURE.md) - Technical architecture and design decisions
+- 📚 [examples/](./examples/) - Working macro examples
 
 ---
 

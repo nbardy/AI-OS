@@ -1,363 +1,270 @@
-# AI-OS v2 Migration Guide
+# Migration Guide: AI-OS v1 to v2
 
-## Overview
+**Date:** 2026-01-17  
+**Purpose:** Guide for migrating from AI-OS v1 (OpenRouter-based) to v2 (Claude Code native)
 
-AI-OS v2 represents a fundamental architectural shift from OpenRouter-based execution to Claude Code native execution. This guide will help you migrate your macros and understand the new capabilities.
+---
 
-## What Changed
+## What's New in v2
 
-### Architecture
-- **Before**: Custom XML patching on top of OpenRouter API
-- **After**: Claude Code subprocess orchestration with native tool use
+AI-OS v2 is a complete rewrite that uses **Claude Code** as the execution substrate instead of calling OpenRouter directly. This provides:
 
-### Key Benefits
-1. **Real parallel execution** - `gather()` and `async_=True` now work
-2. **Better file editing** - Uses Claude Code's Edit tool instead of XML parsing
-3. **Native tooling** - Inherits all Claude Code capabilities (WebSearch, Grep, etc.)
-4. **Simpler codebase** - Removed ~1200 lines of infrastructure code
-5. **More reliable** - Battle-tested Claude Code runtime
+1. **Native tool use** - Claude Code handles file operations, shell commands, etc.
+2. **Better reliability** - No more XML patch parsing, uses Claude's Edit tool directly
+3. **Parallel execution** - Run multiple Claude calls concurrently with `gather()`
+4. **Simpler codebase** - Removed ~1800 lines of code
+5. **Cost tracking** - Automatic tracking of API usage and costs
+
+---
 
 ## Breaking Changes
 
-### 1. No More OpenRouter
+### 1. Environment Variables
 
-**Before (v1):**
+**v1:**
 ```bash
 export OPENROUTER_API_KEY=sk-or-...
 ```
 
-**After (v2):**
+**v2:**
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-Also need Claude Code CLI installed:
+Claude Code requires an Anthropic API key, not OpenRouter.
+
+### 2. Dependencies
+
+**v1:** Required `aiohttp` for OpenRouter API calls
+
+**v2:** Requires Claude Code CLI to be installed:
 ```bash
 npm install -g @anthropic-ai/claude-code
+# or
+brew install claude-code
 ```
 
-### 2. Patch → Edit
+### 3. Patch System Removed
 
-The `ah.patch()` function is replaced by `ah.edit()`.
+The old `ah.patch()` function that returned structured patch objects is gone.
 
-**Before (v1):**
+**v1:**
 ```python
-ah.patch("""
-<plan>
-  Add authentication to the app
-</plan>
-<code filename="auth.py">
-...
-</code>
-""")
+patch = ah.patch("Add user authentication")
+if patch:
+    for file in patch.get("files", []):
+        ai.log(f"Modified: {file.path}")
 ```
 
-**After (v2):**
+**v2:**
 ```python
-ah.edit("Add authentication to the app")
-# Claude Code decides what files to create/edit
+# Just use edit() directly
+ai.edit("Add user authentication")
 ```
 
-The new API is more flexible - you describe what you want, Claude figures out how to do it.
+---
 
-### 3. Parallel Execution Now Works
+## API Changes
 
-**Before (v1):**
+### Import Statement
+
+**v1 and v2 (both work):**
 ```python
-# This didn't actually work - ah.llm() was not implemented
-results = await asyncio.gather(
-    ah.llm("prompt 1"),
-    ah.llm("prompt 2")
+import ai_os.core.macro_helpers as ah
+```
+
+**v2 (recommended):**
+```python
+import ai_os as ai
+```
+
+The `ai` namespace is cleaner and more Pythonic.
+
+### Core Functions
+
+| v1 | v2 | Notes |
+|----|-----|-------|
+| `ah.log(msg)` | `ai.log(msg)` | Unchanged |
+| `ah.chat(prompt)` | `ai.chat(prompt)` | Now uses Claude Code |
+| `ah.patch(plan)` | `ai.edit(instruction)` | Different semantics |
+| `ah.shell(cmd)` | `ai.shell(cmd)` | Unchanged |
+| `ah.approve(msg)` | `ai.approve(msg)` | Unchanged |
+| `ah.get_var(name)` | `ai.get_var(name)` | Unchanged |
+| N/A | `ai.gather(*prompts)` | **New:** Parallel execution |
+| N/A | `ai.vision(prompt, image)` | **New:** Image analysis |
+| N/A | `ai.read(path)` | **New:** Direct file read |
+| N/A | `ai.write(path, content)` | **New:** Direct file write |
+
+### Parallel Execution
+
+**v2 introduces parallel execution:**
+
+```python
+# Run 5 prompts in parallel
+results = ai.gather(
+    "Generate idea 1",
+    "Generate idea 2", 
+    "Generate idea 3",
+    "Generate idea 4",
+    "Generate idea 5",
+    model="haiku"  # Optional: use haiku for speed
 )
+
+for i, result in enumerate(results):
+    ai.log(f"Idea {i+1}: {result}")
 ```
 
-**After (v2):**
+This is much faster than sequential calls.
+
+---
+
+## Migration Examples
+
+### Example 1: Simple TDD Macro
+
+**v1:**
 ```python
-# Option 1: Use gather() (simplest)
-results = ah.gather("prompt 1", "prompt 2", "prompt 3")
-
-# Option 2: Use async_=True with asyncio
-async def parallel():
-    return await asyncio.gather(
-        ah.chat("prompt 1", async_=True),
-        ah.chat("prompt 2", async_=True)
-    )
-
-results = asyncio.run(parallel())
-```
-
-### 4. New DSL Functions
-
-Several new functions are available:
-
-```python
-# New in v2
-ah.status("Working...")  # Context manager for spinners
-ah.ask("Choose:", choices=["A", "B"])  # Multiple choice prompts
-ah.confirm_changes(files)  # Show diffs before applying
-ah.glob("**/*.py")  # Find files
-ah.timestamp()  # Get current timestamp
-ah.random_id()  # Generate random ID
-```
-
-## Migration Steps
-
-### Step 1: Update Environment
-
-```bash
-# Unset OpenRouter key
-unset OPENROUTER_API_KEY
-
-# Set Anthropic key
-export ANTHROPIC_API_KEY=sk-ant-...
-
-# Install Claude Code
-npm install -g @anthropic-ai/claude-code
-
-# Verify
-claude --version
-```
-
-### Step 2: Update Dependencies
-
-```bash
-cd ai-os_2
-uv sync  # or: pip install -e .
-```
-
-### Step 3: Update Your Macros
-
-For each macro file:
-
-1. **Replace patch with edit**:
-   ```python
-   # Before
-   ah.patch(plan)
-
-   # After
-   ah.edit("Implement the plan: " + plan_description)
-   ```
-
-2. **Update parallel patterns**:
-   ```python
-   # Before (broken)
-   results = await asyncio.gather(ah.llm(p) for p in prompts)
-
-   # After (works!)
-   results = ah.gather(*prompts)
-   ```
-
-3. **Add human checkpoints** (optional but recommended):
-   ```python
-   if not ah.approve("Continue with these changes?"):
-       return
-   ```
-
-### Step 4: Test Your Macros
-
-```bash
-# Run your macro
-/macro examples/your_macro.py
-
-# Or from shell
-uv run aios
-> @examples/your_macro.py
-```
-
-## API Reference
-
-### Unchanged Functions
-
-These work exactly as before:
-
-```python
-ah.log(msg)              # Print to console
-ah.chat(prompt)          # Chat with Claude
-ah.shell(cmd)            # Run shell command
-ah.approve(msg)          # Y/N prompt
-ah.get_var(name)         # Get CLI argument
-ah.set_var(name, value)  # Set context variable
-ah.get_cost()            # Get token costs
-ah.read(path)            # Read file
-ah.write(path, content)  # Write file
-ah.exists(path)          # Check file exists
-```
-
-### New Functions
-
-```python
-# Parallel execution
-ah.gather(*prompts, model="haiku")  # Run prompts in parallel
-
-# Async pattern
-ah.chat(prompt, async_=True)  # Returns coroutine
-ah.chat_json(prompt, async_=True)
-ah.vision(prompt, image, async_=True)
-ah.edit(instruction, async_=True)
-
-# UI improvements
-ah.status(msg)            # Spinner context manager
-ah.ask(question, choices) # Multiple choice prompt
-ah.confirm_changes(files) # Show diffs
-
-# Utilities
-ah.glob(pattern)         # Find files
-ah.timestamp()           # ISO timestamp
-ah.random_id(length=8)   # Random hex ID
-```
-
-### Changed Functions
-
-```python
-# v1: ah.patch(xml_plan)
-# v2: ah.edit(instruction, file=None)
-ah.edit("Add error handling to auth.py")
-ah.edit("Fix all type errors", file="src/main.py")
-```
-
-## Example Migration
-
-### Before (v1)
-
-```python
-# examples/old_tdd.py
 import ai_os.core.macro_helpers as ah
 
 def main(ctx, **kwargs):
     goal = kwargs.get("goal")
-
+    
     # Generate test
-    test_plan = ah.chat(f"Write a test for: {goal}")
-    ah.patch(test_plan)
-
-    # Generate implementation
-    impl_plan = ah.chat("Write code to pass the test")
-    ah.patch(impl_plan)
-
-    # Run tests
-    ah.shell("pytest")
+    patch = ah.patch(f"Create a pytest test for: {goal}")
+    test_file = find_test_file()
+    
+    # Implementation loop
+    for i in range(5):
+        patch = ah.patch(f"Implement code to pass {test_file}")
+        exit_code = ah.shell(f"pytest {test_file}")
+        if exit_code == 0:
+            ah.log("Tests pass!")
+            break
 ```
 
-### After (v2)
-
+**v2:**
 ```python
-# examples/new_tdd.py
-import ai_os.core.macro_helpers as ah
+import ai_os as ai
 
 def main(ctx, **kwargs):
     goal = kwargs.get("goal")
-
-    # Generate test (Claude Code creates the file directly)
-    ah.edit(f"Create a pytest test file for: {goal}")
-
-    test_files = ah.glob("tests/test_*.py")
-    if not test_files:
-        ah.log("[red]No test file created[/red]")
-        return
-
-    # Human checkpoint
-    if not ah.approve("Test created. Continue with implementation?"):
-        return
-
+    
+    # Generate test
+    ai.edit(f"Create a pytest test for: {goal}")
+    test_file = find_test_file()
+    
     # Implementation loop
-    for attempt in range(5):
-        ah.log(f"[cyan]Attempt {attempt + 1}/5[/cyan]")
-
-        # Generate implementation
-        ah.edit(f"Write code to pass tests in {test_files[-1]}")
-
-        # Run tests
-        exit_code = ah.shell(f"pytest {test_files[-1]} -v")
-
+    for i in range(5):
+        ai.edit(f"Implement code to pass {test_file}")
+        exit_code = ai.shell(f"pytest {test_file}")
         if exit_code == 0:
-            ah.log("[bold green]Tests pass![/bold green]")
-            cost = ah.get_cost()
-            ah.log(f"[dim]Cost: ${cost['total_cost_usd']:.4f}[/dim]")
-            return
-
-        if not ah.approve("Retry?"):
+            ai.log("Tests pass!")
             break
-
-    ah.log("[red]Max attempts reached[/red]")
 ```
 
-### Key Improvements
+**Key changes:**
+- `ah.patch()` → `ai.edit()`
+- Import changed to `import ai_os as ai`
 
-1. **No XML parsing** - Just tell Claude what to do
-2. **Human checkpoints** - User can abort at any point
-3. **Better error handling** - Loop with retry logic
-4. **Cost tracking** - Show final cost
-5. **Simpler code** - Focus on logic, not format
+### Example 2: Parallel Idea Generation
+
+**v1 (sequential):**
+```python
+import ai_os.core.macro_helpers as ah
+
+def main(ctx, **kwargs):
+    ideas = []
+    for i in range(5):
+        idea = ah.chat(f"Generate creative idea #{i+1}")
+        ideas.append(idea)
+    
+    # This is slow - 5 sequential API calls!
+```
+
+**v2 (parallel):**
+```python
+import ai_os as ai
+
+def main(ctx, **kwargs):
+    # All 5 prompts run in parallel!
+    ideas = ai.gather(
+        "Generate creative idea #1",
+        "Generate creative idea #2",
+        "Generate creative idea #3",
+        "Generate creative idea #4",
+        "Generate creative idea #5",
+        model="haiku"
+    )
+    
+    # Much faster - parallel execution
+```
+
+---
 
 ## Troubleshooting
 
-### "Claude Code not found"
+### "claude: command not found"
+
+Claude Code CLI is not installed. Install it:
 
 ```bash
-# Install Claude Code
 npm install -g @anthropic-ai/claude-code
-
-# Or use npx (no install needed)
-# The orchestrator will try this automatically
 ```
 
-### "API key not set"
-
+Or check installation:
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-# Add to ~/.bashrc or ~/.zshrc for persistence
+which claude
+claude --version
 ```
 
-### "Imports not working"
+### "No module named 'anthropic'"
 
-Make sure you're importing from the right place:
+The Python SDK isn't needed for v2. Only the Claude Code CLI is required.
 
-```python
-# Correct
-import ai_os.core.macro_helpers as ah
+### Cost Tracking Not Working
 
-# Also works (new style)
-import ai_os as ai
-ai.chat("hello")
-```
+Cost tracking only works when Claude Code returns JSON output. In v2, this is automatic for `chat()` and `chat_json()`, but not for streaming operations.
 
-### "async_=True not working"
+---
 
-Make sure you're using it correctly:
+## Migration Checklist
 
-```python
-# Wrong - returns coroutine, doesn't execute
-result = ah.chat("hello", async_=True)
-print(result)  # <coroutine object>
+- [ ] Install Claude Code CLI: `npm install -g @anthropic-ai/claude-code`
+- [ ] Set `ANTHROPIC_API_KEY` environment variable
+- [ ] Remove `OPENROUTER_API_KEY` (no longer needed)
+- [ ] Update imports: `import ai_os as ai` (recommended)
+- [ ] Replace `ah.patch()` with `ai.edit()`
+- [ ] Test macros work with `aios`
+- [ ] Verify parallel execution works if using `gather()`
+- [ ] Check that file operations work
 
-# Correct - use with asyncio.gather
-async def run():
-    results = await asyncio.gather(
-        ah.chat("one", async_=True),
-        ah.chat("two", async_=True)
-    )
-    return results
+---
 
-results = asyncio.run(run())
+## Benefits of v2
 
-# Or use gather() (simpler)
-results = ah.gather("one", "two")
-```
+1. **Simpler** - No XML patch parsing, just use Claude's Edit tool
+2. **Faster** - Parallel execution with `gather()`
+3. **More reliable** - Claude Code handles tool use natively
+4. **Cheaper** - Can use haiku model for simple tasks
+5. **Better errors** - Claude Code provides clearer error messages
+
+---
 
 ## Getting Help
 
-- GitHub Issues: https://github.com/yourusername/ai-os/issues
-- Example macros: `examples/` directory
-- Full DSL reference: See `agent_notes/04_python_dsl_design.md`
+- Documentation: See `README.md`
+- Examples: Check `examples/` directory
+- Issues: https://github.com/nbardy/AI-OS/issues
+
+---
 
 ## Summary
 
-The v2 migration is mostly straightforward:
+v2 is a major improvement that simplifies the codebase and improves reliability. The migration is straightforward:
 
-1. ✅ Install Claude Code CLI
-2. ✅ Set ANTHROPIC_API_KEY
-3. ✅ Replace `ah.patch()` with `ah.edit()`
-4. ✅ Use `ah.gather()` for parallel execution
-5. ✅ Add human checkpoints with `ah.approve()`
+1. Install Claude Code CLI
+2. Update environment variable
+3. Replace `ah.patch()` with `ai.edit()`
+4. Optionally use `ai.gather()` for parallel execution
 
-Your macros will be more reliable, faster (true parallelism!), and easier to maintain.
+Most macros should work with minimal changes!
