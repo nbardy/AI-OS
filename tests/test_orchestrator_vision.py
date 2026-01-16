@@ -13,61 +13,90 @@ from ai_os.core.orchestrator import ClaudeOrchestrator
 
 def test_vision_basic():
     """Test basic vision API call structure."""
-    orch = ClaudeOrchestrator()
+    import tempfile
 
-    # Vision should construct a prompt that references the image file path
-    with patch.object(orch, '_chat_sync', return_value="I see a red circle") as mock_chat:
-        result = orch.vision("What shape is this?", "/path/to/image.png")
+    # Create a temporary image file for testing
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.png', delete=False) as f:
+        f.write("fake image data")
+        temp_path = f.name
 
-        # Verify it called chat with the right prompt structure
-        mock_chat.assert_called_once()
-        call_args = mock_chat.call_args
-        prompt = call_args[0][0]  # First positional arg
+    try:
+        orch = ClaudeOrchestrator()
 
-        assert "/path/to/image.png" in prompt
-        assert "What shape is this?" in prompt
-        assert result == "I see a red circle"
+        # Vision should construct a prompt that references the image file path
+        with patch.object(orch, '_chat_sync', return_value="I see a red circle") as mock_chat:
+            result = orch.vision("What shape is this?", temp_path)
+
+            # Verify it called chat with the right prompt structure
+            mock_chat.assert_called_once()
+            call_args = mock_chat.call_args
+            prompt = call_args[0][0]  # First positional arg
+
+            assert temp_path in prompt
+            assert "What shape is this?" in prompt
+            assert result == "I see a red circle"
+    finally:
+        Path(temp_path).unlink(missing_ok=True)
 
 
 def test_vision_with_model_override():
     """Test vision with custom model."""
-    orch = ClaudeOrchestrator(default_model="sonnet")
+    import tempfile
 
-    with patch.object(orch, '_chat_sync', return_value="Analysis complete") as mock_chat:
-        result = orch.vision(
-            "Analyze this chart",
-            "/path/to/chart.png",
-            model="opus"
-        )
+    # Create a temporary image file for testing
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.png', delete=False) as f:
+        f.write("fake image data")
+        temp_path = f.name
 
-        # Verify model was passed through
-        call_args = mock_chat.call_args
-        assert call_args[1].get('model') == 'opus' or call_args[0][1] == 'opus'
-        assert result == "Analysis complete"
+    try:
+        orch = ClaudeOrchestrator(default_model="sonnet")
+
+        with patch.object(orch, '_chat_sync', return_value="Analysis complete") as mock_chat:
+            result = orch.vision(
+                "Analyze this chart",
+                temp_path,
+                model="opus"
+            )
+
+            # Verify model was passed through
+            call_args = mock_chat.call_args
+            assert call_args[1].get('model') == 'opus' or call_args[0][1] == 'opus'
+            assert result == "Analysis complete"
+    finally:
+        Path(temp_path).unlink(missing_ok=True)
 
 
 def test_vision_async():
     """Test async vision call."""
     import asyncio
+    import tempfile
 
-    orch = ClaudeOrchestrator()
+    # Create a temporary image file for testing
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.jpg', delete=False) as f:
+        f.write("fake image data")
+        temp_path = f.name
 
-    async def test_coroutine():
-        # Mock the async chat method to return a coroutine
-        async def mock_async_result(*args, **kwargs):
-            return "Async result"
+    try:
+        orch = ClaudeOrchestrator()
 
-        with patch.object(orch, '_chat_async', side_effect=mock_async_result):
-            result = await orch.vision(
-                "What's in this image?",
-                "/path/to/image.jpg",
-                async_=True
-            )
-            return result
+        async def test_coroutine():
+            # Mock the async chat method to return a coroutine
+            async def mock_async_result(*args, **kwargs):
+                return "Async result"
 
-    # Run async test
-    result = asyncio.run(test_coroutine())
-    assert result == "Async result"
+            with patch.object(orch, '_chat_async', side_effect=mock_async_result):
+                result = await orch.vision(
+                    "What's in this image?",
+                    temp_path,
+                    async_=True
+                )
+                return result
+
+        # Run async test
+        result = asyncio.run(test_coroutine())
+        assert result == "Async result"
+    finally:
+        Path(temp_path).unlink(missing_ok=True)
 
 
 def test_vision_with_real_file():
@@ -108,17 +137,9 @@ def test_vision_file_not_found():
     """Test that vision handles non-existent files gracefully."""
     orch = ClaudeOrchestrator()
 
-    # Mock subprocess to simulate Claude Code's response to missing file
-    with patch('subprocess.run') as mock_run:
-        # Claude Code would return an error for missing file
-        mock_run.return_value = MagicMock(
-            returncode=1,
-            stdout="",
-            stderr="Error: File not found"
-        )
-
-        try:
-            orch.vision("Analyze", "/nonexistent/image.png")
-            assert False, "Should have raised RuntimeError"
-        except RuntimeError as e:
-            assert "Claude Code failed" in str(e)
+    # With the new file validation, it should raise FileNotFoundError before calling subprocess
+    try:
+        orch.vision("Analyze", "/nonexistent/image.png")
+        assert False, "Should have raised FileNotFoundError"
+    except FileNotFoundError as e:
+        assert "Image not found" in str(e)
