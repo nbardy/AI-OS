@@ -300,6 +300,27 @@ def gather(*prompts: str, model: str = None, **kwargs) -> List[str]:
     return orch.gather(*prompts, model=model, **kwargs)
 
 
+async def gather_async(*prompts: str, model: str = None, **kwargs) -> List[str]:
+    """
+    Run multiple prompts in parallel using true asyncio (fastest option).
+
+    Use this when you're already in an async context for maximum performance.
+
+    Args:
+        *prompts: Variable number of prompts to run
+        model: Model override (applies to all)
+
+    Returns:
+        List of response strings in the same order as prompts
+
+    Example:
+        import asyncio
+        results = asyncio.run(ai.gather_async("prompt1", "prompt2", "prompt3"))
+    """
+    orch = get_orchestrator()
+    return await orch.gather_async(*prompts, model=model, **kwargs)
+
+
 # =========================================================================
 # File Operations
 # =========================================================================
@@ -532,6 +553,7 @@ __all__ = [
     "spawn",
     "join",
     "gather",
+    "gather_async",
     # File operations
     "read",
     "write",

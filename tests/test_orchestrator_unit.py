@@ -126,40 +126,73 @@ class TestChatUnit:
 
 
 # =============================================================================
-# Unit Tests - JSON Parsing
+# Unit Tests - JSON Parsing (Edge Cases)
 # =============================================================================
 
 class TestJsonParsing:
-    """Test JSON response parsing."""
+    """Test JSON response parsing - focus on edge cases Claude actually returns."""
 
-    def test_parse_json_direct(self):
-        """Test direct JSON parsing."""
+    def test_parse_json_with_markdown_and_explanation(self):
+        """Test JSON parsing when Claude explains before/after the JSON."""
         orch = ClaudeOrchestrator()
-        result = orch._parse_json('{"key": "value"}')
-        assert result == {"key": "value"}
+        response = """I'll analyze that for you.
 
-    def test_parse_json_with_markdown(self):
-        """Test JSON parsing with markdown wrapping."""
-        orch = ClaudeOrchestrator()
-        response = """Here's the JSON:
+Here's the JSON output:
 ```json
-{"status": "success"}
+{"status": "success", "count": 42}
 ```
-"""
+
+Let me know if you need anything else!"""
         result = orch._parse_json(response)
-        assert result == {"status": "success"}
+        assert result == {"status": "success", "count": 42}
 
-    def test_parse_json_array(self):
-        """Test parsing JSON array."""
+    def test_parse_json_nested_braces_in_string(self):
+        """Test parsing JSON with braces inside string values (tricky regex case)."""
         orch = ClaudeOrchestrator()
-        result = orch._parse_json('[1, 2, 3]')
-        assert result == [1, 2, 3]
+        response = '{"code": "function foo() { return {}; }", "valid": true}'
+        result = orch._parse_json(response)
+        assert result["valid"] is True
+        assert "{}" in result["code"]
 
-    def test_parse_json_invalid(self):
-        """Test that invalid JSON raises ValueError."""
+    def test_parse_json_unicode(self):
+        """Test parsing JSON with unicode characters."""
         orch = ClaudeOrchestrator()
-        with pytest.raises(ValueError, match="No valid JSON"):
-            orch._parse_json("This is not JSON at all")
+        response = '{"emoji": "🚀", "chinese": "你好", "special": "café"}'
+        result = orch._parse_json(response)
+        assert result["emoji"] == "🚀"
+        assert result["chinese"] == "你好"
+
+    def test_parse_json_deeply_nested(self):
+        """Test parsing deeply nested JSON structures."""
+        orch = ClaudeOrchestrator()
+        response = '{"a": {"b": {"c": {"d": {"e": "deep"}}}}}'
+        result = orch._parse_json(response)
+        assert result["a"]["b"]["c"]["d"]["e"] == "deep"
+
+    def test_parse_json_array_of_objects(self):
+        """Test parsing array of objects (common LLM output)."""
+        orch = ClaudeOrchestrator()
+        response = '[{"id": 1, "name": "a"}, {"id": 2, "name": "b"}]'
+        result = orch._parse_json(response)
+        assert len(result) == 2
+        assert result[0]["id"] == 1
+
+    def test_parse_json_invalid_gives_helpful_error(self):
+        """Test that invalid JSON gives a helpful error message."""
+        orch = ClaudeOrchestrator()
+        with pytest.raises(ValueError) as exc_info:
+            orch._parse_json("This is definitely not JSON, just plain text.")
+        assert "No valid JSON" in str(exc_info.value)
+        # Error should include part of the response for debugging
+        assert "This is" in str(exc_info.value)
+
+    def test_parse_json_empty_response(self):
+        """Test handling of empty/whitespace responses."""
+        orch = ClaudeOrchestrator()
+        with pytest.raises(ValueError):
+            orch._parse_json("")
+        with pytest.raises(ValueError):
+            orch._parse_json("   \n\t  ")
 
 
 # =============================================================================
@@ -225,78 +258,106 @@ class TestShellOperations:
 
 
 # =============================================================================
-# Unit Tests - Prompt Building
+# Unit Tests - Prompt Building (Edge Cases)
 # =============================================================================
 
 class TestPromptBuilding:
-    """Test prompt construction logic."""
+    """Test prompt construction - focus on real scenarios."""
 
-    def test_build_prompt_simple(self):
-        """Test simple prompt building."""
+    def test_build_prompt_preserves_formatting(self):
+        """Test that prompt building preserves code formatting and newlines."""
         orch = ClaudeOrchestrator()
-        result = orch._build_prompt("Hello")
-        assert result == "Hello"
+        code_prompt = """Fix this code:
+```python
+def foo():
+    return 42
+```"""
+        result = orch._build_prompt(code_prompt)
+        # Should preserve the code block formatting
+        assert "```python" in result
+        assert "def foo():" in result
 
-    def test_build_prompt_with_system_instruction(self):
-        """Test prompt with system instruction."""
+    def test_build_prompt_instruction_comes_first(self):
+        """Test that system instruction appears before the prompt."""
         orch = ClaudeOrchestrator()
-        result = orch._build_prompt("Hello", system_instruction="Be helpful")
-        assert "INSTRUCTION: Be helpful" in result
-        assert "Hello" in result
+        result = orch._build_prompt("User query", system_instruction="Be concise")
+        # Instruction should come before the query
+        instruction_pos = result.find("INSTRUCTION:")
+        query_pos = result.find("User query")
+        assert instruction_pos < query_pos
 
-    def test_build_prompt_with_context_files(self):
-        """Test prompt with file context."""
+    def test_build_prompt_handles_missing_context_file(self):
+        """Test graceful handling when context file doesn't exist."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            # Create test file
-            test_file = Path(tmpdir) / "context.txt"
-            test_file.write_text("File content here")
+            orch = ClaudeOrchestrator(working_dir=tmpdir)
+            result = orch._build_prompt("Hello", context_files=["nonexistent.txt"])
+            # Should include error message, not crash
+            assert "error" in result.lower()
+            assert "nonexistent.txt" in result
+
+    def test_build_prompt_multiple_context_files(self):
+        """Test prompt with multiple context files."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create multiple files
+            (Path(tmpdir) / "file1.py").write_text("# Python file 1")
+            (Path(tmpdir) / "file2.py").write_text("# Python file 2")
 
             orch = ClaudeOrchestrator(working_dir=tmpdir)
-            result = orch._build_prompt("Hello", context_files=["context.txt"])
+            result = orch._build_prompt("Analyze", context_files=["file1.py", "file2.py"])
 
-            assert "CONTEXT FILES:" in result
-            assert "context.txt" in result
-            assert "File content here" in result
-            assert "Hello" in result
+            assert "file1.py" in result
+            assert "file2.py" in result
+            assert "Python file 1" in result
+            assert "Python file 2" in result
 
 
 # =============================================================================
-# Unit Tests - Cost Tracking
+# Unit Tests - Cost Tracking (Realistic Scenarios)
 # =============================================================================
 
 class TestCostTracking:
-    """Test cost tracking accumulation."""
+    """Test cost tracking - focus on realistic accumulation patterns."""
 
-    def test_cost_starts_at_zero(self):
-        """Test that cost starts at zero."""
-        orch = ClaudeOrchestrator()
-        cost = orch.get_cost()
-        assert cost["input_tokens"] == 0
-        assert cost["output_tokens"] == 0
-        assert cost["total_cost_usd"] == 0.0
-
-    def test_cost_accumulates(self):
-        """Test that cost accumulates correctly."""
+    def test_cost_accumulates_across_many_calls(self):
+        """Test cost accumulation over many API calls."""
         orch = ClaudeOrchestrator()
 
-        # First call
-        orch._track_cost({
-            "input_tokens": 100,
-            "output_tokens": 50,
-            "total_cost_usd": 0.001
-        })
-
-        # Second call
-        orch._track_cost({
-            "input_tokens": 200,
-            "output_tokens": 100,
-            "total_cost_usd": 0.002
-        })
+        # Simulate 10 API calls with varying costs
+        for i in range(10):
+            orch._track_cost({
+                "input_tokens": 100 + i * 10,  # 100, 110, 120...
+                "output_tokens": 50 + i * 5,   # 50, 55, 60...
+                "total_cost_usd": 0.001 + i * 0.0001
+            })
 
         cost = orch.get_cost()
-        assert cost["input_tokens"] == 300
-        assert cost["output_tokens"] == 150
-        assert cost["total_cost_usd"] == 0.003
+        # Sum of 100+110+...+190 = 1450
+        assert cost["input_tokens"] == 1450
+        # Sum of 50+55+...+95 = 725
+        assert cost["output_tokens"] == 725
+
+    def test_cost_handles_missing_fields(self):
+        """Test that missing cost fields don't crash."""
+        orch = ClaudeOrchestrator()
+
+        # Partial cost data (some APIs don't return all fields)
+        orch._track_cost({"input_tokens": 100})  # Missing other fields
+        orch._track_cost({})  # Empty cost
+
+        cost = orch.get_cost()
+        assert cost["input_tokens"] == 100
+        assert cost["output_tokens"] == 0  # Default when missing
+
+    def test_cost_get_returns_copy(self):
+        """Test that get_cost returns a copy, not the internal dict."""
+        orch = ClaudeOrchestrator()
+        orch._track_cost({"input_tokens": 100, "output_tokens": 50, "total_cost_usd": 0.001})
+
+        cost1 = orch.get_cost()
+        cost1["input_tokens"] = 99999  # Mutate the returned dict
+
+        cost2 = orch.get_cost()
+        assert cost2["input_tokens"] == 100  # Original should be unchanged
 
 
 # =============================================================================

@@ -11,7 +11,7 @@ import os
 import re
 import asyncio
 import uuid
-from concurrent.futures import ThreadPoolExecutor, Future
+from concurrent.futures import ThreadPoolExecutor, Future, as_completed
 from threading import Lock
 from typing import Any, Dict, List, Optional, Generator, Union
 from dataclasses import dataclass, field
@@ -595,22 +595,35 @@ Use the Edit or Write tools as appropriate. Read files first if needed."""
         """
         Wait for spawned agents to complete.
 
+        Uses as_completed() for better performance - results are collected
+        as they finish rather than waiting in order.
+
         Args:
             agents: List of SpawnedAgent from spawn()
             timeout: Optional timeout in seconds
 
         Returns:
-            List of ClaudeResult in the same order as agents
+            List of ClaudeResult in the same order as agents (preserves input order)
         """
         timeout = timeout or self.timeout
-        results = []
 
-        for agent in agents:
-            try:
-                result = agent.future.result(timeout=timeout)
-                results.append(result)
-            except Exception as e:
-                results.append(ClaudeResult(success=False, error=str(e)))
+        # Map futures to their index for order preservation
+        future_to_idx = {agent.future: i for i, agent in enumerate(agents)}
+        results = [None] * len(agents)
+
+        # Use as_completed() to get results as they finish (faster than sequential)
+        try:
+            for future in as_completed(future_to_idx.keys(), timeout=timeout):
+                idx = future_to_idx[future]
+                try:
+                    results[idx] = future.result(timeout=0)  # Already complete
+                except Exception as e:
+                    results[idx] = ClaudeResult(success=False, error=str(e))
+        except TimeoutError:
+            # Fill remaining slots with timeout errors
+            for i, result in enumerate(results):
+                if result is None:
+                    results[i] = ClaudeResult(success=False, error="Timeout waiting for result")
 
         return results
 
@@ -642,6 +655,40 @@ Use the Edit or Write tools as appropriate. Read files first if needed."""
 
         # Extract just the result strings (or empty string on failure)
         return [r.result if r.success else "" for r in results]
+
+    async def gather_async(
+        self,
+        *prompts: str,
+        model: str = None,
+        **kwargs
+    ) -> List[str]:
+        """
+        Run multiple prompts in parallel using true asyncio.
+
+        This is faster than gather() for many concurrent requests because
+        it uses asyncio.gather() directly instead of ThreadPoolExecutor.
+
+        Args:
+            *prompts: Variable number of prompts to run
+            model: Model override (applies to all)
+            **kwargs: Additional arguments passed to each chat
+
+        Returns:
+            List of response strings in the same order as prompts
+
+        Example:
+            results = await orch.gather_async(
+                "prompt 1",
+                "prompt 2",
+                "prompt 3",
+                model="haiku"
+            )
+        """
+        coros = [
+            self._chat_async(prompt, model=model, **kwargs)
+            for prompt in prompts
+        ]
+        return await asyncio.gather(*coros, return_exceptions=True)
 
     def shutdown(self) -> None:
         """Shutdown the thread pool executor."""
