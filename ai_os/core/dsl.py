@@ -19,7 +19,7 @@ import uuid
 import subprocess
 from pathlib import Path
 from contextlib import contextmanager
-from typing import Any, Dict, List, Optional, Union, Coroutine, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Union, Coroutine
 from datetime import datetime
 
 from rich.console import Console

@@ -1,38 +1,20 @@
-import cmd
-from typing import List
 from pathlib import Path
+import subprocess
+
 from rich.console import Console
-from rich.text import Text
-# rich.table.Table is no longer used here
-# rich.tree.Tree is no longer used here
-import subprocess # Add subprocess import
-import os # Needed for path completion
-from rich.prompt import Prompt # Needed for _ask_approval
-# Import the global context_manager instance
-from ai_os.utils.context import context_manager
-# Import commands which now operate on the context_manager
-from ai_os.core import commands
-# Import shared parsing utilities
-from ai_os.core.commands import COMMANDS, ALIASES, parse_input
-
-# Import the Textual Context Editor App
-from ai_os.ui.context_editor import ContextEditorApp
-from ai_os.core.macro_runner import MacroRunner # Import the runner
-
-# KnownFileData is no longer needed here
-
-console = Console() # Keep Rich Console for the cmd.Cmd shell output
-
-# --- Textual Context Editor App code is now removed ---
-
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion, PathCompleter, WordCompleter
 from prompt_toolkit.document import Document
 from prompt_toolkit.styles import Style
-from ai_os.utils.command_history import CommandHistoryManager, PersistentHistory
 
-# --- Modern Prompt Toolkit Shell ---
-# COMMANDS and ALIASES are now imported from ai_os.core.commands
+from ai_os.utils.context import context_manager
+from ai_os.utils.command_history import CommandHistoryManager, PersistentHistory
+from ai_os.core import commands
+from ai_os.core.commands import COMMANDS, ALIASES, parse_input
+from ai_os.ui.context_editor import ContextEditorApp
+from ai_os.core.macro_runner import MacroRunner
+
+console = Console()
 
 class AIOSCompleter(Completer):
     def __init__(self):
@@ -255,62 +237,21 @@ class AIOSPromptShell:
         else:
             self.console.print(f"[yellow]Unknown command: '{line}'. Type /help for available commands.[/yellow]")
 
-# Entrypoint for main.py
-
-def main():
-    shell = AIOSPromptShell()
-    shell.run()
-
-def get_class_methods(cls):
-    # This helper is no longer used by do_help
-    return [method_name for method_name in dir(cls) if callable(getattr(cls, method_name))]
+# Entrypoints
 
 def initialize_cli():
-    """Initializes the CLI and context."""
-    console.print("[bold green]Starting AI-OS Shell...[/bold green]")
-
-    # Print the quote
-    console.print("\n[bold italic yellow]“Abandon vibe coding—embrace AI engineering.”[/bold italic yellow]\n")
-
-    # Context initialization
-    console.print("[bold green]Initializing context with git files...[/bold green]")
-    files_added = context_manager.load_git_repo()
-    if files_added:
-        console.print(f"[bold green]Added {len(files_added)} files to context.[/bold green]")
-    else:
-        console.print("[bold yellow]No git files found or added to context.[/bold yellow]")
-
-    # Instantiate the shell early to access commands/aliases
+    """Initialize and run the AI-OS CLI shell."""
+    # Ensure config folder exists
     config_folder = Path.home() / ".ai_os"
     config_folder.mkdir(parents=True, exist_ok=True)
     config_file = config_folder / "config.json"
     if not config_file.exists():
         config_file.write_text("{}")
 
-    # Command history file is now managed by AIOSShell
-    # history_file = config_folder / "history.txt"
-    # if not history_file.exists():
-    #     history_file.write_text("")
-
-
+    # Run the shell (handles all initialization and welcome messages)
     shell = AIOSPromptShell()
-
-    console.print("\n[bold green]AI-OS Shell Ready[/bold green]")
-    console.print("[dim]Tab completion: commands, files, and directories. Type /help for commands.[/dim]")
-
-    console.print("\n[bold]Available commands:[/bold]")
-    console.print("  " + ", ".join(COMMANDS))
-
-    if ALIASES:
-        console.print("\n[bold]Aliases:[/bold]")
-        # Show aliases like: '> (/chat)'
-        aliases_list = sorted([f"{alias} ({ALIASES[alias]})" for alias in ALIASES])
-        console.print("  " + ", ".join(aliases_list))
-
-    console.print("\nType /help for details on a command.")
-    # Use the existing shell instance
     shell.run()
 
-# The main entry point should be managed elsewhere (e.g., in __main__.py or main.py)
-# if __name__ == '__main__':
-#    initialize_cli()
+
+# Alias for backwards compatibility
+main = initialize_cli
