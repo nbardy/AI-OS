@@ -12,6 +12,8 @@ from rich.prompt import Prompt # Needed for _ask_approval
 from ai_os.utils.context import context_manager
 # Import commands which now operate on the context_manager
 from ai_os.core import commands
+# Import shared parsing utilities
+from ai_os.core.commands import COMMANDS, ALIASES, parse_input
 
 # Import the Textual Context Editor App
 from ai_os.ui.context_editor import ContextEditorApp
@@ -30,17 +32,7 @@ from prompt_toolkit.styles import Style
 from ai_os.utils.command_history import CommandHistoryManager, PersistentHistory
 
 # --- Modern Prompt Toolkit Shell ---
-
-COMMANDS = [
-    '/macro', '/patch', '/run', '/context', '/model', '/exit', '/help', '/quit', '/history', '/search',
-]
-ALIASES = {
-    '>': '/chat',
-    '+': '/patch',
-    '!': '/run',
-    '@': '/macro',
-    '?': '/search',
-}
+# COMMANDS and ALIASES are now imported from ai_os.core.commands
 
 class AIOSCompleter(Completer):
     def __init__(self):
@@ -145,12 +137,8 @@ class AIOSPromptShell:
     def handle_command(self, line):
         if not line:
             return
-        # Alias expansion
-        if line[0] in ALIASES:
-            line = ALIASES[line[0]] + ' ' + line[1:]
-        parts = line.split(maxsplit=1)
-        cmd = parts[0]
-        arg = parts[1] if len(parts) > 1 else ''
+        # Use shared parse_input from commands module
+        cmd, arg = parse_input(line)
         if cmd in ['/exit', '/quit']:
             self.running = False
             self.console.print("Exiting AI-OS. Goodbye!")

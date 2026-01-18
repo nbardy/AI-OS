@@ -4,30 +4,30 @@ AI-OS - Agentic Macro Framework
 
 Usage:
     aios                              # Launch interactive TUI
-    aios -p "chat prompt"             # Run chat prompt headlessly
-    aios -m macro.py arg=value        # Run macro headlessly
+    aios "> chat prompt"              # Run chat prompt headlessly
+    aios "@ macro.py arg=value"       # Run macro headlessly
     aios --help                       # Show help
 
 Examples:
-    aios -p "What is 2+2?"
-    aios -m examples/hello_macro.py name="World" loops=2
-    aios --macro examples/tree_of_thought.py question="How to design an API?"
+    aios "> What is 2+2?"
+    aios "@ examples/hello_macro.py name=World loops=2"
+    aios "> explain this code" --model haiku
 """
 
 import argparse
 import sys
-from pathlib import Path
+
+# Import shared parsing from commands module
+from ai_os.core.commands import parse_input
 
 
-def run_prompt(prompt: str, model: str = None):
+def run_chat(prompt: str, model: str = None):
     """Run a chat prompt headlessly and print the response."""
     from ai_os.core.orchestrator import ClaudeOrchestrator
 
     orch = ClaudeOrchestrator()
     if model:
         orch.default_model = model
-
-    print(f"Running prompt: {prompt[:80]}{'...' if len(prompt) > 80 else ''}\n")
 
     try:
         # Use streaming for nicer output
@@ -44,20 +44,13 @@ def run_prompt(prompt: str, model: str = None):
         sys.exit(1)
 
 
-def run_macro(macro_path: str, args: list):
+def run_macro(argline: str):
     """Run a macro headlessly."""
     from rich.console import Console
     from ai_os.core.macro_runner import MacroRunner
 
-    # Build argline: "path/to/macro.py key=value key2=value2"
-    argline = macro_path
-    if args:
-        argline += " " + " ".join(args)
-
     console = Console()
     runner = MacroRunner(console=console)
-
-    print(f"Running macro: {argline}\n")
 
     try:
         runner.run(argline)
@@ -73,22 +66,17 @@ def main():
         epilog="""
 Examples:
   aios                                    # Launch interactive TUI
-  aios -p "Explain this code"             # Run chat prompt
-  aios -m examples/hello_macro.py         # Run macro
-  aios -m examples/tdd_macro.py test_goal="implement fibonacci"
+  aios "> Explain this code"              # Run chat prompt
+  aios "@ examples/hello_macro.py"        # Run macro
+  aios "@ examples/tdd_macro.py test_goal='implement fibonacci'"
+  aios "> quick answer" --model haiku     # Use specific model
         """
     )
 
     parser.add_argument(
-        '-p', '--prompt',
-        type=str,
-        help='Run a chat prompt headlessly (no TUI)'
-    )
-
-    parser.add_argument(
-        '-m', '--macro',
-        type=str,
-        help='Run a macro file headlessly (no TUI)'
+        'command',
+        nargs='?',
+        help='Command to run: "> prompt" for chat, "@ macro.py args" for macro'
     )
 
     parser.add_argument(
@@ -99,23 +87,20 @@ Examples:
         help='Model to use (default: sonnet)'
     )
 
-    parser.add_argument(
-        'args',
-        nargs='*',
-        help='Arguments for macro (key=value format)'
-    )
-
     args = parser.parse_args()
 
-    # Determine mode
-    if args.prompt:
-        # Headless chat mode
-        run_prompt(args.prompt, model=args.model)
+    if args.command:
+        # Headless mode - parse and execute command using shared parser
+        cmd, arg = parse_input(args.command)
 
-    elif args.macro:
-        # Headless macro mode
-        run_macro(args.macro, args.args)
-
+        if cmd == '/chat':
+            run_chat(arg, model=args.model)
+        elif cmd == '/macro':
+            run_macro(arg)
+        else:
+            print(f"Unsupported command for headless mode: {cmd}", file=sys.stderr)
+            print("Supported: > or /chat for prompts, @ or /macro for macros", file=sys.stderr)
+            sys.exit(1)
     else:
         # Interactive TUI mode (default)
         from ai_os.cli import initialize_cli

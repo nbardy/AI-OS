@@ -14,11 +14,9 @@ Usage:
 
 from __future__ import annotations
 
-import os
 import time
 import uuid
 import subprocess
-import glob as glob_module
 from pathlib import Path
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Union, Coroutine, TYPE_CHECKING

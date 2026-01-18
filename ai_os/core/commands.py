@@ -10,18 +10,72 @@ These functions are called by cli.py when the user runs commands like:
 V2: Now uses Claude Code via orchestrator instead of OpenRouter.
 """
 
-from typing import List, Dict, Any, Optional, Generator
+from typing import List, Dict, Any, Optional, Generator, Tuple
+
+# =============================================================================
+# Command Parsing (shared between TUI and headless CLI)
+# =============================================================================
+
+# Canonical command names and their aliases
+ALIASES = {
+    '>': '/chat',
+    '+': '/patch',
+    '!': '/run',
+    '@': '/macro',
+    '?': '/search',
+}
+
+# All commands (for completion, help, etc.)
+COMMANDS = ['/chat', '/macro', '/patch', '/run', '/context', '/model', '/exit', '/help', '/quit', '/history', '/search']
+
+
+def parse_input(line: str) -> Tuple[str, str]:
+    """
+    Parse user input into (command, argument).
+
+    Handles both aliases (>, @, +, !, ?) and full commands (/chat, /macro, etc.).
+
+    Args:
+        line: Raw user input string
+
+    Returns:
+        Tuple of (command, argument) where command is the canonical form like '/chat'
+
+    Examples:
+        parse_input("> hello") -> ('/chat', 'hello')
+        parse_input("@ macro.py arg=val") -> ('/macro', 'macro.py arg=val')
+        parse_input("/chat hello") -> ('/chat', 'hello')
+        parse_input("just text") -> ('/chat', 'just text')  # default to chat
+    """
+    line = line.strip()
+    if not line:
+        return ('', '')
+
+    # Check for alias prefix (single char like >, @, +, !, ?)
+    if line[0] in ALIASES:
+        cmd = ALIASES[line[0]]
+        arg = line[1:].strip()
+        return (cmd, arg)
+
+    # Check for slash commands
+    if line.startswith('/'):
+        parts = line.split(maxsplit=1)
+        cmd = parts[0]
+        arg = parts[1] if len(parts) > 1 else ''
+        return (cmd, arg)
+
+    # Default: treat as chat
+    return ('/chat', line)
+
+
 from pathlib import Path
 import time
-import subprocess
-import os
 
 # Import the new orchestrator
 from ai_os.core.orchestrator import get_orchestrator
 
 # Import context manager for history tracking
 from ai_os.utils.context import context_manager
-from ai_os.utils.config import config_manager
 
 # Third-Party Imports
 from rich.console import Console
@@ -116,20 +170,23 @@ Just answer the user's question or discuss the topic."""
 
 def patch(
     plan: str,
-    strategy_name: str = "full_file",  # Ignored in v2, kept for API compat
+    strategy_name: str = "full_file",  # noqa: ARG001 - kept for v1 API compat
     console: Console = None,
-    user_approval_override: Optional[bool] = None
+    user_approval_override: Optional[bool] = None  # noqa: ARG001 - kept for v1 API compat
 ) -> Dict[str, Any]:
     """
     Have Claude edit files to implement the given plan.
 
     This tells Claude Code to use its Edit tool to make changes.
 
+    Note: strategy_name and user_approval_override are kept for v1 API
+    compatibility but are no longer used in v2 (Claude Code handles these).
+
     Args:
         plan: Description of what changes to make
-        strategy_name: Ignored in v2 (was XML strategy selector)
+        strategy_name: DEPRECATED - Ignored in v2 (was XML strategy selector)
         console: Console for output
-        user_approval_override: If True, skip user approval (for macros)
+        user_approval_override: DEPRECATED - Ignored in v2 (Claude Code handles approvals)
 
     Returns:
         Dict with 'applied' (bool) and 'summary' (str)
