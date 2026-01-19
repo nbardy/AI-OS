@@ -188,13 +188,24 @@ class AIOSPromptShell:
             app.run()
             self.console.print("\n[bold green]Returned to AI-OS shell.[/bold green]")
         elif cmd in ['/model']:
-            from ai_os.ui.minimal_model_selector import run_minimal_model_selector
-            selected_model = run_minimal_model_selector()
-            if selected_model:
-                self.console.print(f"[green]Model selected: {selected_model}[/green]")
-            else:
-                self.console.print("[yellow]No model selected[/yellow]")
-            self.console.print("\n[bold green]Returned to AI-OS shell.[/bold green]")
+            from ai_os.core.orchestrator import get_orchestrator
+
+            if not arg:
+                orch = get_orchestrator()
+                current = orch.default_model
+                self.console.print(f"[bold]Current model:[/bold] {current}")
+                self.console.print("[dim]Usage: /model <opus|sonnet|haiku>[/dim]")
+                return
+
+            model = arg.strip().lower()
+            if model not in ['opus', 'sonnet', 'haiku']:
+                self.console.print(f"[red]Invalid model: {model}[/red]")
+                self.console.print("[dim]Valid options: opus, sonnet, haiku[/dim]")
+                return
+
+            orch = get_orchestrator()
+            orch.default_model = model
+            self.console.print(f"[green]✓ Model set to: {model}[/green]")
         elif cmd in ['/patch', '+']:
             if not arg:
                 self.console.print("[yellow]Usage: /patch <plan> [strategy][/yellow]")
