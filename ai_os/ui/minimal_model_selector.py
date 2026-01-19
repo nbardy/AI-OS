@@ -58,10 +58,11 @@ class MinimalModelSelector(App[Optional[str]]):
     
     def compose(self):
         yield Static("=== MODEL SELECTOR ===")
+        yield Static("[yellow]⚠️ AI-OS v2 uses Claude Code harness for execution[/yellow]", id="warning")
         yield Static("Current: NONE", id="current-display")
         yield Static("Search: ", id="search-display")
         yield ListView(id="model-list")
-        yield Static("Loading...", id="status")
+        yield Static("Loading models from OpenRouter...", id="status")
         yield Footer()
     
     async def on_mount(self):

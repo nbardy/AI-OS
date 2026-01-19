@@ -185,15 +185,15 @@ class ModelSelector(App[Optional[str]]):
         # Model list
         with Container(id="model-list-container"):
             self.model_list = ListView(id="model-list")
-            self.loading_display = Static("Loading models from OpenRouter...", id="loading")
+            self.loading_display = Static("Loading models from OpenRouter...\n[dim](Note: AI-OS v2 uses Claude Code harness for execution)[/dim]", id="loading")
             self.error_display = Static("", id="error")
             yield self.loading_display
             yield self.error_display
             yield self.model_list
-        
+
         # Model detail
         with Container(id="model-detail-container"):
-            self.model_detail = Static(id="model-detail")
+            self.model_detail = Static("[yellow]⚠️ AI-OS v2 now uses Claude Code harness for all LLM execution[/yellow]\n[dim]Model selection for reference only[/dim]", id="model-detail")
             yield self.model_detail
         
         yield Footer()
