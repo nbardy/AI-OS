@@ -37,14 +37,14 @@ class SpawnedAgent:
     model: str = "sonnet"
 
 
-def _find_claude_command() -> List[str]:
+def _find_cli_command(cli_name: str) -> List[str]:
     """
-    Find the Claude Code CLI command.
+    Find a CLI command (claude, codex, etc).
 
     Tries in order:
-    1. Use 'where claude' on Unix systems to find the real path (handles aliases)
-    2. Direct 'claude' binary (if installed globally)
-    3. npx @anthropic-ai/claude-code (npm install)
+    1. Use 'where' on Unix systems to find the real path (handles aliases)
+    2. Direct binary (if installed globally)
+    3. npx fallback for npm-based CLIs
 
     Returns the command as a list for subprocess.
     """
@@ -52,34 +52,134 @@ def _find_claude_command() -> List[str]:
     import platform
 
     # Try using 'where' command on Unix systems to get the real path
-    # This handles shell aliases properly
     if platform.system() != "Windows":
         try:
             result = subprocess.run(
-                ["zsh", "-c", "where claude 2>/dev/null | grep -v alias | head -1"],
+                ["zsh", "-c", f"where {cli_name} 2>/dev/null | grep -v alias | head -1"],
                 capture_output=True,
                 text=True,
                 timeout=5
             )
             if result.returncode == 0 and result.stdout.strip():
-                claude_path = result.stdout.strip()
-                if os.path.exists(claude_path):
-                    return [claude_path]
+                path = result.stdout.strip()
+                if os.path.exists(path):
+                    return [path]
         except Exception:
             pass
 
-    # Try direct claude binary with which
-    claude_path = shutil.which("claude")
-    if claude_path and os.path.exists(claude_path):
-        return [claude_path]
+    # Try direct binary with which
+    path = shutil.which(cli_name)
+    if path and os.path.exists(path):
+        return [path]
 
-    # Fall back to npx
+    # For npm-based CLIs, try npx
     if shutil.which("npx"):
-        return ["npx", "--yes", "@anthropic-ai/claude-code"]
+        pkg_map = {
+            "claude": "@anthropic-ai/claude-code",
+            "codex": "@anthropic-ai/codex",
+        }
+        if cli_name in pkg_map:
+            return ["npx", "--yes", pkg_map[cli_name]]
 
     raise RuntimeError(
-        "Claude Code CLI not found. Install with: npm install -g @anthropic-ai/claude-code"
+        f"{cli_name} CLI not found. Install with: npm install -g @anthropic-ai/{cli_name}"
     )
+
+
+def _find_claude_command() -> List[str]:
+    """Find the Claude Code CLI command."""
+    return _find_cli_command("claude")
+
+
+def call_harness(
+    harness: str,
+    model: str,
+    prompt: str,
+    working_dir: str = None,
+    skip_permissions: bool = True,
+    timeout: int = 600
+) -> Dict[str, Any]:
+    """
+    Call either Claude Code or Codex harness.
+
+    Args:
+        harness: 'claude' or 'codex'
+        model: Model name (sonnet, opus, haiku, etc.)
+        prompt: Input prompt
+        working_dir: Working directory
+        skip_permissions: Skip permission prompts
+        timeout: Timeout in seconds
+
+    Returns:
+        Dict with 'result', 'cost', 'error' keys
+    """
+    if harness not in ["claude", "codex"]:
+        return {"error": f"Unknown harness: {harness}", "result": "", "cost": {}}
+
+    working_dir = working_dir or os.getcwd()
+
+    try:
+        cli_cmd = _find_cli_command(harness)
+
+        # Build command based on harness
+        if harness == "claude":
+            cmd = cli_cmd + ["-p", "--model", model, "--output-format", "json"]
+            if skip_permissions:
+                cmd.append("--dangerously-skip-permissions")
+        else:  # codex
+            cmd = cli_cmd + ["exec", "--model", model]
+            # Codex doesn't have --output-format json, will parse text output
+
+        result = subprocess.run(
+            cmd,
+            input=prompt,
+            capture_output=True,
+            text=True,
+            cwd=working_dir,
+            timeout=timeout
+        )
+
+        if result.returncode != 0:
+            return {
+                "error": f"{harness} failed: {result.stderr}",
+                "result": "",
+                "cost": {}
+            }
+
+        # Parse output based on harness
+        if harness == "claude":
+            try:
+                output = json.loads(result.stdout)
+                return {
+                    "result": output.get("result", ""),
+                    "cost": output.get("cost", {}),
+                    "error": None
+                }
+            except json.JSONDecodeError as e:
+                return {
+                    "error": f"Failed to parse JSON: {e}",
+                    "result": result.stdout,
+                    "cost": {}
+                }
+        else:  # codex - returns text, not JSON
+            return {
+                "result": result.stdout,
+                "cost": {},  # Codex doesn't return cost info
+                "error": None
+            }
+
+    except subprocess.TimeoutExpired:
+        return {
+            "error": f"{harness} timed out after {timeout}s",
+            "result": "",
+            "cost": {}
+        }
+    except Exception as e:
+        return {
+            "error": str(e),
+            "result": "",
+            "cost": {}
+        }
 
 
 class ClaudeOrchestrator:
@@ -94,6 +194,7 @@ class ClaudeOrchestrator:
         self,
         working_dir: str = None,
         default_model: str = "sonnet",
+        default_harness: str = "claude",
         timeout: int = 600,
         skip_permissions: bool = True
     ):
@@ -106,6 +207,7 @@ class ClaudeOrchestrator:
                 # Fallback to home directory if cwd doesn't exist
                 self.working_dir = str(Path.home())
         self.default_model = default_model
+        self.default_harness = default_harness  # 'claude' or 'codex'
         self.timeout = timeout
         self.skip_permissions = skip_permissions
         self.total_cost = {

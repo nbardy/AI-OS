@@ -192,8 +192,7 @@ class AIOSPromptShell:
 
             if not arg:
                 orch = get_orchestrator()
-                current = orch.default_model
-                self.console.print(f"[bold]Current model:[/bold] {current}")
+                self.console.print(f"[bold]Current:[/bold] {orch.default_harness} + {orch.default_model}")
                 self.console.print("[dim]Usage: /model <opus|sonnet|haiku>[/dim]")
                 return
 
@@ -206,6 +205,25 @@ class AIOSPromptShell:
             orch = get_orchestrator()
             orch.default_model = model
             self.console.print(f"[green]✓ Model set to: {model}[/green]")
+
+        elif cmd in ['/harness']:
+            from ai_os.core.orchestrator import get_orchestrator
+
+            if not arg:
+                orch = get_orchestrator()
+                self.console.print(f"[bold]Current harness:[/bold] {orch.default_harness}")
+                self.console.print("[dim]Usage: /harness <claude|codex>[/dim]")
+                return
+
+            harness = arg.strip().lower()
+            if harness not in ['claude', 'codex']:
+                self.console.print(f"[red]Invalid harness: {harness}[/red]")
+                self.console.print("[dim]Valid options: claude, codex[/dim]")
+                return
+
+            orch = get_orchestrator()
+            orch.default_harness = harness
+            self.console.print(f"[green]✓ Harness set to: {harness}[/green]")
         elif cmd in ['/patch', '+']:
             if not arg:
                 self.console.print("[yellow]Usage: /patch <plan> [strategy][/yellow]")
