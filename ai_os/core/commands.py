@@ -26,7 +26,7 @@ ALIASES = {
 }
 
 # All commands (for completion, help, etc.)
-COMMANDS = ['/chat', '/macro', '/patch', '/run', '/context', '/model', '/harness', '/exit', '/help', '/quit', '/history', '/search']
+COMMANDS = ['/chat', '/macro', '/patch', '/run', '/context', '/model', '/exit', '/help', '/quit', '/history', '/search']
 
 
 def parse_input(line: str) -> Tuple[str, str]:

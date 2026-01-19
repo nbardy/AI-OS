@@ -192,38 +192,44 @@ class AIOSPromptShell:
 
             if not arg:
                 orch = get_orchestrator()
-                self.console.print(f"[bold]Current:[/bold] {orch.default_harness} + {orch.default_model}")
-                self.console.print("[dim]Usage: /model <opus|sonnet|haiku>[/dim]")
+                self.console.print(f"[bold]Current:[/bold] {orch.default_harness}-{orch.default_model}")
+                self.console.print("[dim]Usage: /model <claude-opus|claude-sonnet|claude-haiku|codex-5.2|codex-5.2-max>[/dim]")
                 return
 
-            model = arg.strip().lower()
-            if model not in ['opus', 'sonnet', 'haiku']:
-                self.console.print(f"[red]Invalid model: {model}[/red]")
-                self.console.print("[dim]Valid options: opus, sonnet, haiku[/dim]")
+            spec = arg.strip().lower()
+
+            # Parse harness-model pair
+            if '-' not in spec:
+                self.console.print(f"[red]Invalid format: {spec}[/red]")
+                self.console.print("[dim]Format: <harness>-<model> (e.g., claude-sonnet, codex-5.2)[/dim]")
                 return
 
-            orch = get_orchestrator()
-            orch.default_model = model
-            self.console.print(f"[green]✓ Model set to: {model}[/green]")
+            parts = spec.split('-', 1)
+            harness = parts[0]
+            model = parts[1]
 
-        elif cmd in ['/harness']:
-            from ai_os.core.orchestrator import get_orchestrator
-
-            if not arg:
-                orch = get_orchestrator()
-                self.console.print(f"[bold]Current harness:[/bold] {orch.default_harness}")
-                self.console.print("[dim]Usage: /harness <claude|codex>[/dim]")
-                return
-
-            harness = arg.strip().lower()
+            # Validate harness
             if harness not in ['claude', 'codex']:
                 self.console.print(f"[red]Invalid harness: {harness}[/red]")
-                self.console.print("[dim]Valid options: claude, codex[/dim]")
+                self.console.print("[dim]Valid harnesses: claude, codex[/dim]")
                 return
+
+            # Validate model for each harness
+            if harness == 'claude':
+                if model not in ['opus', 'sonnet', 'haiku']:
+                    self.console.print(f"[red]Invalid claude model: {model}[/red]")
+                    self.console.print("[dim]Valid: claude-opus, claude-sonnet, claude-haiku[/dim]")
+                    return
+            elif harness == 'codex':
+                if model not in ['5.2', '5.2-max']:
+                    self.console.print(f"[red]Invalid codex model: {model}[/red]")
+                    self.console.print("[dim]Valid: codex-5.2, codex-5.2-max[/dim]")
+                    return
 
             orch = get_orchestrator()
             orch.default_harness = harness
-            self.console.print(f"[green]✓ Harness set to: {harness}[/green]")
+            orch.default_model = model
+            self.console.print(f"[green]✓ Model set to: {harness}-{model}[/green]")
         elif cmd in ['/patch', '+']:
             if not arg:
                 self.console.print("[yellow]Usage: /patch <plan> [strategy][/yellow]")
