@@ -74,31 +74,56 @@ Output ONLY the shader code, no explanation."""
                 for approach in approaches
             ]
 
-            shaders = ai.gather(*shader_prompts, model="haiku")
+            raw_shaders = ai.gather(*shader_prompts, model="haiku")
 
-        # Save shaders
-        for i, shader in enumerate(shaders):
-            ai.write(f"shaders/candidate_{i}.glsl", shader)
+        # Validate and save shaders - only accept responses containing actual GLSL code
+        def is_valid_shader(response: str) -> bool:
+            """Check if response is actual GLSL code, not conversational text."""
+            code = response.strip().lower()
+            # Valid GLSL contains these keywords
+            has_glsl = any(kw in code for kw in ['void main', 'gl_fragcolor', 'uniform', '#version'])
+            # Filter out conversational responses
+            is_chat = any(phrase in code for phrase in ["i'll", "i will", "done.", "here's", "let me", "for you"])
+            return has_glsl and not is_chat
 
-        ai.log(f"[green]Generated {len(shaders)} shaders[/green]")
+        shaders = []
+        for i, shader in enumerate(raw_shaders):
+            if is_valid_shader(shader):
+                ai.write(f"shaders/candidate_{i}.glsl", shader)
+                shaders.append((i, shader))
+            else:
+                ai.log(f"[yellow]Candidate {i}: Response was conversational, not shader code[/yellow]")
+
+        ai.log(f"[green]Generated {len(shaders)} valid shaders[/green]")
 
         # Step 3: Render shaders (if glslviewer available)
         ai.log("[dim]Rendering shaders...[/dim]")
-        for i in range(len(shaders)):
-            # Try to render - ignore failures
-            exit_code = ai.shell(
-                f"glslviewer shaders/candidate_{i}.glsl -s 5 -o renders/candidate_{i}.png 2>/dev/null || true"
-            )
 
-        # Step 4: Score renders with vision model
+        # Create renders directory
+        ai.shell("mkdir -p renders")
+
+        # Check if glslviewer is available
+        glslviewer_available = ai.shell("which glslviewer", capture=True) != ""
+
+        if not glslviewer_available:
+            ai.log("[yellow]glslviewer not installed - skipping renders[/yellow]")
+            ai.log("[dim]Install with: brew install glslviewer (macOS) or apt-get install glslviewer (Linux)[/dim]")
+        else:
+            for shader_idx, shader in shaders:
+                # Try to render - ignore failures
+                exit_code = ai.shell(
+                    f"glslviewer shaders/candidate_{shader_idx}.glsl -s 5 -o renders/candidate_{shader_idx}.png 2>/dev/null || true"
+                )
+
+        # Step 4: Score renders with vision model (only if we have renders)
         ai.log("[cyan]Scoring renders...[/cyan]")
         scores = []
 
-        for i in range(len(shaders)):
-            render_path = f"renders/candidate_{i}.png"
+        for shader_idx, shader in shaders:
+            render_path = f"renders/candidate_{shader_idx}.png"
 
             if not ai.exists(render_path):
-                ai.log(f"[yellow]Skipping candidate_{i} (no render)[/yellow]")
+                ai.log(f"[yellow]Skipping candidate_{shader_idx} (no render)[/yellow]")
                 continue
 
             score_prompt = f"""Score this shader render 1-10:
@@ -116,10 +141,10 @@ Output JSON: {{"score": N, "reason": "brief reason"}}
                 # Parse JSON from response
                 import json
                 score_obj = json.loads(score_data) if isinstance(score_data, str) else score_data
-                scores.append((i, score_obj.get("score", 0), score_obj.get("reason", "")))
+                scores.append((shader_idx, score_obj.get("score", 0), score_obj.get("reason", "")))
             except Exception as e:
-                ai.log(f"[yellow]Scoring failed for candidate_{i}: {e}[/yellow]")
-                scores.append((i, 0, "scoring failed"))
+                ai.log(f"[yellow]Scoring failed for candidate_{shader_idx}: {e}[/yellow]")
+                scores.append((shader_idx, 0, "scoring failed"))
 
         if not scores:
             ai.log("[red]No successful scores this round[/red]")
