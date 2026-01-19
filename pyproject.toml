@@ -34,7 +34,7 @@ dev = [
 
 
 [project.scripts]
-aios = "main:main"          # ← point to the main() function in main.py
+aios = "ai_os.cli:main"
 
 [tool.setuptools]           # ← add this table if it doesn't exist
 py-modules = ["main"]       # ← tells setuptools to install main.py as a module

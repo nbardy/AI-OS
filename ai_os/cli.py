@@ -255,3 +255,6 @@ def initialize_cli():
 
 # Alias for backwards compatibility
 main = initialize_cli
+
+if __name__ == "__main__":
+    initialize_cli()

@@ -1,5 +1,29 @@
+# Python
 **/*.pyc
+**/__pycache__/
+**/*.py[cod]
+**/.Python
+*.egg-info/
+dist/
+build/
+
+# Environment
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
 .DS_Store
-tmp
-ai_os.egg-info/*
-**/.pyc
+Thumbs.db
+
+# Project
+tmp/
+uploads/
+usage_tracking*.json
+test.txt
