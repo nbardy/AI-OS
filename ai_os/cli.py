@@ -276,6 +276,8 @@ class AIOSPromptShell:
 
 def initialize_cli():
     """Initialize and run the AI-OS CLI shell."""
+    import sys
+
     # Ensure config folder exists
     config_folder = Path.home() / ".ai_os"
     config_folder.mkdir(parents=True, exist_ok=True)
@@ -283,8 +285,17 @@ def initialize_cli():
     if not config_file.exists():
         config_file.write_text("{}")
 
-    # Run the shell (handles all initialization and welcome messages)
     shell = AIOSPromptShell()
+
+    # Check for --prompt flag for single command execution
+    if "--prompt" in sys.argv:
+        idx = sys.argv.index("--prompt")
+        if idx + 1 < len(sys.argv):
+            command = sys.argv[idx + 1]
+            shell.handle_command(command.strip())
+            return
+
+    # Run interactive shell
     shell.run()
 
 

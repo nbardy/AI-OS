@@ -12,7 +12,18 @@ Usage:
     /macro examples/shader_evolution.py goal="aurora borealis" iterations=3
 """
 
+import re
 import ai_os as ai
+
+
+def parse_score(response: str) -> tuple[int, str]:
+    """Extract score and reason from response using regex."""
+    score_match = re.search(r'"?score"?\s*[=:]\s*(\d+)', response, re.IGNORECASE)
+    reason_match = re.search(r'"?reason"?\s*[=:]\s*"([^"]+)"', response, re.IGNORECASE)
+
+    score = int(score_match.group(1)) if score_match else 5
+    reason = reason_match.group(1) if reason_match else "no reason given"
+    return score, reason
 
 
 def main(ctx, **kwargs):
@@ -41,17 +52,20 @@ def main(ctx, **kwargs):
 
         # Step 1: Plan diverse approaches
         with ai.status("Planning approaches..."):
-            plan = ai.chat_json(f"""
+            plan_response = ai.chat(f"""
 Goal: {goal}
 Best score so far: {best_score}
 Prior critiques: {history[-2:] if history else "None"}
 
 Plan {num_candidates} VERY DIFFERENT GLSL shader approaches.
 Each should use distinct mathematical techniques.
-
-Output JSON: {{"approaches": ["approach 1", "approach 2", ...]}}
+List them numbered 1. 2. 3. etc.
 """, model="sonnet")
-            approaches = plan.get("approaches", [f"Approach {i}" for i in range(num_candidates)])
+            # Parse numbered list
+            approaches = re.findall(r'\d+\.\s*(.+?)(?=\n\d+\.|\n\n|$)', plan_response, re.DOTALL)
+            approaches = [a.strip() for a in approaches[:num_candidates]]
+            if not approaches:
+                approaches = [f"Approach {i}" for i in range(num_candidates)]
 
         ai.log(f"[green]Planned {len(approaches)} approaches[/green]")
 
@@ -86,7 +100,7 @@ Use the Write tool to save the shader code to the specified file."""
 
             shader_code = ai.read(shader_path)
 
-            score = ai.chat_json(f"""Score this GLSL shader 1-10 for goal: {goal}
+            response = ai.chat(f"""Score this GLSL shader 1-10 for goal: {goal}
 
 ```glsl
 {shader_code[:800]}
@@ -95,11 +109,12 @@ Use the Write tool to save the shader code to the specified file."""
 Criteria: correctness, relevance, mathematical sophistication, visual appeal.
 Be critical. Most are 4-6.
 
-Output JSON: {{"score": N, "reason": "brief reason"}}
+Reply with: score: N, reason: "your reason"
 """, model="sonnet")
 
-            scores.append((i, score.get("score", 0), score.get("reason", "")))
-            ai.log(f"[dim]  candidate_{i}: {score.get('score', 0)} - {score.get('reason', '')[:50]}[/dim]")
+            score, reason = parse_score(response)
+            scores.append((i, score, reason))
+            ai.log(f"[dim]  candidate_{i}: {score} - {reason[:50]}[/dim]")
 
         if not scores:
             ai.log("[red]No successful scores this round[/red]")
