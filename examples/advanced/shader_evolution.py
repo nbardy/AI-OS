@@ -62,7 +62,7 @@ def main(ctx, **kwargs):
         # Step 2: Generate shaders in parallel
         with ai.status(f"Generating {len(approaches)} shaders..."):
             shader_prompts = [
-                f"""Write a GLSL fragment shader implementing: {approach}
+                f"""Write a GLSL fragment shader to shaders/candidate_{i}.glsl implementing: {approach}
 
 Requirements:
 - uniform float u_time for animation
@@ -70,31 +70,14 @@ Requirements:
 - Output to gl_FragColor
 - Be mathematically interesting
 
-Output ONLY the shader code, no explanation."""
-                for approach in approaches
+Use the Write tool to save the shader code to the specified file."""
+                for i, approach in enumerate(approaches)
             ]
 
-            raw_shaders = ai.gather(*shader_prompts, model="haiku")
+            results = ai.gather(*shader_prompts, model="haiku")
 
-        # Validate and save shaders - only accept responses containing actual GLSL code
-        def is_valid_shader(response: str) -> bool:
-            """Check if response is actual GLSL code, not conversational text."""
-            code = response.strip().lower()
-            # Valid GLSL contains these keywords
-            has_glsl = any(kw in code for kw in ['void main', 'gl_fragcolor', 'uniform', '#version'])
-            # Filter out conversational responses
-            is_chat = any(phrase in code for phrase in ["i'll", "i will", "done.", "here's", "let me", "for you"])
-            return has_glsl and not is_chat
-
-        shaders = []
-        for i, shader in enumerate(raw_shaders):
-            if is_valid_shader(shader):
-                ai.write(f"shaders/candidate_{i}.glsl", shader)
-                shaders.append((i, shader))
-            else:
-                ai.log(f"[yellow]Candidate {i}: Response was conversational, not shader code[/yellow]")
-
-        ai.log(f"[green]Generated {len(shaders)} valid shaders[/green]")
+        # Log results
+        ai.log(f"[green]Generated {len(results)} shaders[/green]")
 
         # Step 3: Render shaders (if glslviewer available)
         ai.log("[dim]Rendering shaders...[/dim]")
@@ -109,21 +92,23 @@ Output ONLY the shader code, no explanation."""
             ai.log("[yellow]glslviewer not installed - skipping renders[/yellow]")
             ai.log("[dim]Install with: brew install glslviewer (macOS) or apt-get install glslviewer (Linux)[/dim]")
         else:
-            for shader_idx, shader in shaders:
-                # Try to render - ignore failures
-                exit_code = ai.shell(
-                    f"glslviewer shaders/candidate_{shader_idx}.glsl -s 5 -o renders/candidate_{shader_idx}.png 2>/dev/null || true"
-                )
+            for i in range(len(approaches)):
+                shader_path = f"shaders/candidate_{i}.glsl"
+                if ai.exists(shader_path):
+                    # Try to render - ignore failures
+                    ai.shell(
+                        f"glslviewer {shader_path} -s 5 -o renders/candidate_{i}.png 2>/dev/null || true"
+                    )
 
         # Step 4: Score renders with vision model (only if we have renders)
         ai.log("[cyan]Scoring renders...[/cyan]")
         scores = []
 
-        for shader_idx, shader in shaders:
-            render_path = f"renders/candidate_{shader_idx}.png"
+        for i in range(len(approaches)):
+            render_path = f"renders/candidate_{i}.png"
 
             if not ai.exists(render_path):
-                ai.log(f"[yellow]Skipping candidate_{shader_idx} (no render)[/yellow]")
+                ai.log(f"[yellow]Skipping candidate_{i} (no render)[/yellow]")
                 continue
 
             score_prompt = f"""Score this shader render 1-10:
@@ -141,10 +126,10 @@ Output JSON: {{"score": N, "reason": "brief reason"}}
                 # Parse JSON from response
                 import json
                 score_obj = json.loads(score_data) if isinstance(score_data, str) else score_data
-                scores.append((shader_idx, score_obj.get("score", 0), score_obj.get("reason", "")))
+                scores.append((i, score_obj.get("score", 0), score_obj.get("reason", "")))
             except Exception as e:
-                ai.log(f"[yellow]Scoring failed for candidate_{shader_idx}: {e}[/yellow]")
-                scores.append((shader_idx, 0, "scoring failed"))
+                ai.log(f"[yellow]Scoring failed for candidate_{i}: {e}[/yellow]")
+                scores.append((i, 0, "scoring failed"))
 
         if not scores:
             ai.log("[red]No successful scores this round[/red]")

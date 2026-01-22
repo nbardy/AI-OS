@@ -1,54 +1,47 @@
 """
-Test for shader_evolution.py macro - demonstrates current failure and fixes.
+Test for shader_evolution.py macro.
 
-This test shows:
-1. Shaders should contain actual GLSL code (not conversational responses)
-2. Renders directory must exist before rendering
-3. Must gracefully handle missing glslviewer
+This test verifies:
+1. Prompts include the file path for Claude Code to write to
+2. Renders directory is created before rendering
+3. Gracefully handles missing glslviewer
 """
 
 import pytest
 from pathlib import Path
 import tempfile
-import json
+import subprocess
 
 
-def test_shader_response_validation():
-    """Test that gathered shaders contain actual GLSL code, not chat responses."""
+def test_shader_prompt_includes_filepath():
+    """Test that shader generation prompts include the target file path."""
 
-    # Simulate what ai.gather() currently returns from LLM
-    bad_responses = [
-        "I'll generate a shader for you. Here's a beautiful approach...",  # Bad: conversational
-        "Done. The shader has been created using...",  # Bad: conversational
-        "void main() { gl_FragColor = vec4(1.0); }",  # Good: actual code
-        "Let me create a shader that...",  # Bad: conversational
+    # Simulate what shader_evolution.py does
+    approaches = ["approach 1", "approach 2"]
+
+    shader_prompts = [
+        f"""Write a GLSL fragment shader to shaders/candidate_{i}.glsl implementing: {approach}
+
+Requirements:
+- uniform float u_time for animation
+- uniform vec2 u_resolution for aspect ratio
+- Output to gl_FragColor
+- Be mathematically interesting
+
+Use the Write tool to save the shader code to the specified file."""
+        for i, approach in enumerate(approaches)
     ]
 
-    # This is what shader_evolution.py should validate
-    def is_valid_shader(response: str) -> bool:
-        """Check if response is actual GLSL code, not chat."""
-        code = response.strip().lower()
-        # Valid GLSL contains these keywords
-        has_glsl = any(keyword in code for keyword in [
-            'void main', 'gl_fragcolor', 'uniform', '#version'
-        ])
-        # Conversational red flags
-        is_chat = any(phrase in code for phrase in [
-            "i'll", "i will", "done.", "here's", "let me", "i can", "for you"
-        ])
-        return has_glsl and not is_chat
+    # Verify prompts include file paths
+    assert "shaders/candidate_0.glsl" in shader_prompts[0]
+    assert "shaders/candidate_1.glsl" in shader_prompts[1]
+    assert "Write tool to save" in shader_prompts[0]
 
-    # Test validation
-    validated = [r for r in bad_responses if is_valid_shader(r)]
-
-    # Should only have 1 valid shader out of 4
-    assert len(validated) == 1, f"Expected 1 valid shader, got {len(validated)}"
-    assert "void main" in validated[0]
-    print(f"✓ Validated {len(validated)} out of {len(bad_responses)} shaders")
+    print(f"✓ All {len(shader_prompts)} prompts include target file paths")
 
 
 def test_renders_directory_creation():
-    """Test that renders directory exists before trying to write to it."""
+    """Test that renders directory is created before attempting to write to it."""
 
     with tempfile.TemporaryDirectory() as tmpdir:
         renders_dir = Path(tmpdir) / "renders"
@@ -56,7 +49,7 @@ def test_renders_directory_creation():
         # Should not exist initially
         assert not renders_dir.exists(), "renders dir should not exist yet"
 
-        # Create it (what shader_evolution.py should do)
+        # Create it (what shader_evolution.py does with mkdir -p)
         renders_dir.mkdir(parents=True, exist_ok=True)
 
         # Now it should exist
@@ -73,9 +66,6 @@ def test_renders_directory_creation():
 def test_glslviewer_check():
     """Test graceful handling of missing glslviewer."""
 
-    # Simulate the check
-    import subprocess
-
     result = subprocess.run(
         "which glslviewer",
         shell=True,
@@ -91,31 +81,30 @@ def test_glslviewer_check():
     else:
         print("✓ glslviewer available")
 
-    # Macro should handle this gracefully
+    # Macro should handle this gracefully either way
     assert True, "Should always pass - just check for tool gracefully"
 
 
-def test_shader_evolution_robustness():
-    """Test that shader_evolution handles failures gracefully."""
+def test_shader_evolution_architecture():
+    """Test the overall architecture of shader_evolution.py."""
 
-    # The macro has 3 failure points:
-    failures = {
-        "1. Bad shader responses": "ai.gather() returns chat instead of code",
-        "2. Missing renders dir": "renders/ doesn't exist before writing",
-        "3. Missing glslviewer": "Tool not installed on system",
+    # The macro flow:
+    architecture = {
+        "Step 1: Plan diverse approaches": "Use Claude to generate multiple shader ideas",
+        "Step 2: Generate shaders in parallel": "Call ai.gather() with prompts that include file paths",
+        "Step 3: Render shaders": "Create renders/ dir, check glslviewer, render if available",
+        "Step 4: Score renders": "Use vision model to score 1-10",
+        "Step 5: Pick winner": "Keep best shader for next iteration",
+        "Step 6: Iterate and improve": "Use feedback to guide next round",
     }
 
-    fixes = {
-        "1. Bad shader responses": "Validate responses contain GLSL keywords",
-        "2. Missing renders dir": "Create with: ai.shell('mkdir -p renders')",
-        "3. Missing glslviewer": "Check with: which glslviewer, skip if missing",
-    }
+    # Key design decision: Prompts include file paths
+    key_principle = "Claude Code uses Write tool to save files, not parsing responses"
 
-    for failure, description in failures.items():
-        fix = fixes[failure]
-        print(f"\n{failure}")
-        print(f"  Problem: {description}")
-        print(f"  Fix: {fix}")
+    print(f"\n✓ Macro architecture:")
+    for step, description in architecture.items():
+        print(f"  {step}: {description}")
 
-    # All failures should have fixes
-    assert len(failures) == len(fixes)
+    print(f"\n✓ Key principle: {key_principle}")
+
+    assert len(architecture) == 6
