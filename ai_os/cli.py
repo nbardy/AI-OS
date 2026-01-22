@@ -6,7 +6,6 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion, PathCompleter, WordCompleter
 from prompt_toolkit.document import Document
 from prompt_toolkit.styles import Style
-from prompt_toolkit.key_binding import KeyBindings
 
 from ai_os.utils.context import context_manager
 from ai_os.utils.command_history import CommandHistoryManager, PersistentHistory
@@ -89,21 +88,12 @@ class AIOSPromptShell:
         self.history_manager = CommandHistoryManager(max_history=100)
         self.persistent_history = PersistentHistory(self.history_manager)
 
-        # Create key bindings for shift+enter to submit
-        kb = KeyBindings()
-
-        @kb.add('s-enter')
-        def _(event):
-            # Shift+Enter submits the current input
-            event.current_buffer.accept_action.validate_and_handle(event)
-
         self.session = PromptSession(
             completer=AIOSCompleter(),
             style=Style.from_dict({
                 'prompt': 'ansicyan bold',
             }),
-            history=self.persistent_history,
-            key_bindings=kb
+            history=self.persistent_history
         )
         self.running = True
 
