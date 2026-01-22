@@ -172,6 +172,8 @@ Reply with: score: N, reason: "your reason"
     ai.log(f"Final best score: {best_score}")
     if best_image:
         ai.log(f"[bold cyan]{best_image}[/bold cyan]")
+        # Display image in terminal if imgcat available
+        ai.shell(f"imgcat {best_image} 2>/dev/null || true")
 
     cost = ai.get_cost()
     ai.log(f"\n[dim]Total cost: ${cost['total_cost_usd']:.4f}[/dim]")
