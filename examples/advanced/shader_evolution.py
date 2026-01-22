@@ -13,6 +13,7 @@ Usage:
 """
 
 import re
+from pathlib import Path
 import ai_os as ai
 
 
@@ -128,9 +129,11 @@ Reply with: score: N, reason: "your reason"
 
         if winner_score > best_score:
             best_score = winner_score
-            best_shader = ai.read(f"shaders/candidate_{winner_idx}.glsl")
-            ai.shell(f"cp shaders/candidate_{winner_idx}.glsl shaders/best.glsl")
-            ai.log("[green]New best shader![/green]")
+            best_path = Path(f"shaders/candidate_{winner_idx}.glsl").resolve()
+            best_shader = ai.read(str(best_path))
+            ai.shell(f"cp {best_path} shaders/best.glsl")
+            ai.log(f"[green]New best shader![/green]")
+            ai.log(f"[bold cyan]{best_path}[/bold cyan]")
 
         # Step 5: Critique for next round
         if best_shader and (round_num + 1) < iterations:
