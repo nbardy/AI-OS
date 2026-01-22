@@ -28,7 +28,7 @@ def main(ctx, **kwargs):
         scores = []
         for i in range(n):
             if ai.exists(f"shaders/c{i}.glsl") and render_shader(f"shaders/c{i}.glsl", f"renders/c{i}.png"):
-                resp = ai.vision(f"Score 1-10 for '{goal}'. Reply: score: N", f"renders/c{i}.png", model="sonnet")
+                resp = ai.chat(f"Score 1-10 for '{goal}'. Reply: score: N", images=[f"renders/c{i}.png"], model="sonnet")
                 score = int(re.search(r'(\d+)', resp).group(1)) if re.search(r'(\d+)', resp) else 5
                 scores.append((i, score))
                 ai.log(f"  c{i}: {score}")

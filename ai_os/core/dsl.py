@@ -180,6 +180,7 @@ def confirm_changes(files: List[str]) -> bool:
 def chat(
     prompt: str,
     context: List[str] = None,
+    images: List[str] = None,
     model: str = None,
     async_: bool = False,
     **kwargs,
@@ -190,6 +191,7 @@ def chat(
     Args:
         prompt: The prompt to send
         context: List of file paths to include as context
+        images: List of image paths to analyze (vision)
         model: Model override (haiku, sonnet, opus)
         async_: If True, returns a coroutine for asyncio.gather()
 
@@ -197,6 +199,10 @@ def chat(
         Response string, or coroutine if async_=True
     """
     orch = get_orchestrator()
+    # If images provided, use vision
+    if images:
+        # For now, just use the first image
+        return orch.vision(prompt, images[0], model=model, async_=async_)
     return orch.chat(prompt, model=model, context_files=context, async_=async_)
 
 
