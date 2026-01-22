@@ -27,3 +27,4 @@ tmp/
 uploads/
 usage_tracking*.json
 test.txt
+shaders/
