@@ -43,12 +43,10 @@ def main(ctx, **kwargs):
     ai.log(f"[bold]Shader Evolution: {goal}[/bold]")
     ai.log(f"[dim]{iterations} rounds, {num_candidates} candidates per round[/dim]")
 
-    # Check for glslviewer
-    has_glslviewer = ai.shell("which glslviewer", capture=True).strip() != ""
-    if not has_glslviewer:
-        ai.log("[red]ERROR: glslviewer not installed[/red]")
-        ai.log("[yellow]Install with: brew install glslviewer[/yellow]")
-        return
+    # Import shader renderer from examples/utils
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent.parent / "utils"))
+    from shader_renderer import render_shader
 
     best_shader = None
     best_score = 0
@@ -103,7 +101,10 @@ Use the Write tool to save the shader code to the specified file."""
             shader_path = f"shaders/candidate_{i}.glsl"
             render_path = f"renders/candidate_{i}.png"
             if ai.exists(shader_path):
-                ai.shell(f"glslviewer {shader_path} -s 3 -o {render_path} 2>/dev/null || true")
+                if render_shader(shader_path, render_path):
+                    ai.log(f"[dim]  Rendered candidate_{i}[/dim]")
+                else:
+                    ai.log(f"[yellow]  Failed to render candidate_{i}[/yellow]")
 
         # Step 4: Score rendered images with vision
         ai.log("[cyan]Scoring renders...[/cyan]")
