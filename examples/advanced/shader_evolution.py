@@ -4,12 +4,14 @@ Shader Evolution Macro - Evolutionary GLSL shader generation.
 
 Demonstrates:
 - Parallel execution with gather()
-- Code-based scoring (no external dependencies)
+- Vision-based scoring of rendered images
 - Iterative improvement loop
 - Human checkpoints
 
+Requires: glslviewer (brew install glslviewer)
+
 Usage:
-    /macro examples/shader_evolution.py goal="aurora borealis" iterations=3
+    /macro examples/advanced/shader_evolution.py goal="aurora borealis" iterations=3
 """
 
 import re
@@ -31,8 +33,8 @@ def main(ctx, **kwargs):
     """
     Evolutionary shader generation workflow.
 
-    Generates multiple shader candidates in parallel, scores them by code quality,
-    keeps the best, and iterates to improve quality.
+    Generates shaders, renders them to images, scores the images with vision,
+    keeps the best, and iterates.
     """
     goal = kwargs.get("goal", "beautiful generative art")
     iterations = int(kwargs.get("iterations", 3))
@@ -41,12 +43,20 @@ def main(ctx, **kwargs):
     ai.log(f"[bold]Shader Evolution: {goal}[/bold]")
     ai.log(f"[dim]{iterations} rounds, {num_candidates} candidates per round[/dim]")
 
+    # Check for glslviewer
+    has_glslviewer = ai.shell("which glslviewer", capture=True).strip() != ""
+    if not has_glslviewer:
+        ai.log("[red]ERROR: glslviewer not installed[/red]")
+        ai.log("[yellow]Install with: brew install glslviewer[/yellow]")
+        return
+
     best_shader = None
     best_score = 0
+    best_image = None
     history = []
 
-    # Create shaders directory
-    ai.shell("mkdir -p shaders")
+    # Create directories
+    ai.shell("mkdir -p shaders renders")
 
     for round_num in range(iterations):
         ai.log(f"\n[bold cyan]═══ Round {round_num + 1}/{iterations} ═══[/bold cyan]")
@@ -62,7 +72,6 @@ Plan {num_candidates} VERY DIFFERENT GLSL shader approaches.
 Each should use distinct mathematical techniques.
 List them numbered 1. 2. 3. etc.
 """, model="sonnet")
-            # Parse numbered list
             approaches = re.findall(r'\d+\.\s*(.+?)(?=\n\d+\.|\n\n|$)', plan_response, re.DOTALL)
             approaches = [a.strip() for a in approaches[:num_candidates]]
             if not approaches:
@@ -88,40 +97,42 @@ Use the Write tool to save the shader code to the specified file."""
 
         ai.log(f"[green]Generated shaders[/green]")
 
-        # Step 3: Score shaders by code quality
-        ai.log("[cyan]Scoring shaders...[/cyan]")
+        # Step 3: Render shaders to images
+        ai.log("[dim]Rendering shaders...[/dim]")
+        for i in range(len(approaches)):
+            shader_path = f"shaders/candidate_{i}.glsl"
+            render_path = f"renders/candidate_{i}.png"
+            if ai.exists(shader_path):
+                ai.shell(f"glslviewer {shader_path} -s 3 -o {render_path} 2>/dev/null || true")
+
+        # Step 4: Score rendered images with vision
+        ai.log("[cyan]Scoring renders...[/cyan]")
         scores = []
 
         for i in range(len(approaches)):
-            shader_path = f"shaders/candidate_{i}.glsl"
+            render_path = Path(f"renders/candidate_{i}.png").resolve()
 
-            if not ai.exists(shader_path):
-                ai.log(f"[yellow]Skipping candidate_{i} (not written)[/yellow]")
+            if not ai.exists(str(render_path)):
+                ai.log(f"[yellow]Skipping candidate_{i} (render failed)[/yellow]")
                 continue
 
-            shader_code = ai.read(shader_path)
+            response = ai.vision(f"""Score this shader render 1-10 for goal: {goal}
 
-            response = ai.chat(f"""Score this GLSL shader 1-10 for goal: {goal}
-
-```glsl
-{shader_code[:800]}
-```
-
-Criteria: correctness, relevance, mathematical sophistication, visual appeal.
+Criteria: visual appeal, mathematical elegance, how well it matches the goal.
 Be critical. Most are 4-6.
 
 Reply with: score: N, reason: "your reason"
-""", model="sonnet")
+""", str(render_path), model="sonnet")
 
             score, reason = parse_score(response)
             scores.append((i, score, reason))
             ai.log(f"[dim]  candidate_{i}: {score} - {reason[:50]}[/dim]")
 
         if not scores:
-            ai.log("[red]No successful scores this round[/red]")
+            ai.log("[red]No successful renders this round[/red]")
             continue
 
-        # Step 4: Pick winner
+        # Step 5: Pick winner
         scores.sort(key=lambda x: x[1], reverse=True)
         winner_idx, winner_score, reason = scores[0]
 
@@ -129,13 +140,14 @@ Reply with: score: N, reason: "your reason"
 
         if winner_score > best_score:
             best_score = winner_score
-            best_path = Path(f"shaders/candidate_{winner_idx}.glsl").resolve()
-            best_shader = ai.read(str(best_path))
-            ai.shell(f"cp {best_path} shaders/best.glsl")
-            ai.log(f"[green]New best shader![/green]")
-            ai.log(f"[bold cyan]{best_path}[/bold cyan]")
+            best_shader = ai.read(f"shaders/candidate_{winner_idx}.glsl")
+            best_image = Path(f"renders/candidate_{winner_idx}.png").resolve()
+            ai.shell(f"cp shaders/candidate_{winner_idx}.glsl shaders/best.glsl")
+            ai.shell(f"cp renders/candidate_{winner_idx}.png renders/best.png")
+            ai.log(f"[green]New best![/green]")
+            ai.log(f"[bold cyan]{best_image}[/bold cyan]")
 
-        # Step 5: Critique for next round
+        # Step 6: Critique for next round
         if best_shader and (round_num + 1) < iterations:
             critique = ai.chat(f"""Briefly critique this shader (2-3 sentences):
 - What works?
@@ -157,7 +169,8 @@ Reply with: score: N, reason: "your reason"
     # Final report
     ai.log(f"\n[bold green]═══ Evolution Complete ═══[/bold green]")
     ai.log(f"Final best score: {best_score}")
-    ai.log(f"Best shader: shaders/best.glsl")
+    if best_image:
+        ai.log(f"[bold cyan]{best_image}[/bold cyan]")
 
     cost = ai.get_cost()
     ai.log(f"\n[dim]Total cost: ${cost['total_cost_usd']:.4f}[/dim]")
