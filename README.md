@@ -1,12 +1,28 @@
-# AI-OS 😊🚀🎉
+# AI-OS
+
+A new operating system for writing and running test time compute AI algorithms.
+
+AI-OS includes 2 key components:
+1. **A small Python DSL** for writing and interacting with AI-OS
+2. **An interactive terminal** for writing and running your AI-OS subroutines
+
+### Why AI-OS?
+
+It helps you unify, chain, and combine test time compute programs.
+
+Usually each test time compute algorithm is in its own separate repo, has its own separate context, and the results can't be integrated or used together. AI-OS lets you plug those isolated programs into a single interactive terminal with history and context management.
+
+AI-OS looks a lot like Claude Code, but lets you run sets of sub-agent subroutines in context.
+
+### Demo
+
+[TODO] Demo video below
+
+---
 
 **"Abandon vibe coding—embrace AI engineering."**
 
-AI-OS is an AI operating system—not a monolithic framework. AI-OS is a tiny core lib and chat UI to allow you to quickly write small lean agentic macros.
-
-Agents are for the common folk, macros are for the nerds.
-
-LLM tooling can make us better engineers, not worse.
+*Agents are for the common folk, macros are for the nerds.*
 
 ---
 

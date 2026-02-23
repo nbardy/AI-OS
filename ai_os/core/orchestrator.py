@@ -215,8 +215,14 @@ class ClaudeOrchestrator:
             "output_tokens": 0,
             "total_cost_usd": 0.0
         }
-        # Cache the claude command
-        self._claude_cmd = _find_claude_command()
+        # Lazy CLI command cache (populated on first use per harness)
+        self._cli_cache: Dict[str, List[str]] = {}
+
+    def _get_cli_cmd(self, harness: str) -> List[str]:
+        """Get CLI command for a harness, caching the result."""
+        if harness not in self._cli_cache:
+            self._cli_cache[harness] = _find_cli_command(harness)
+        return self._cli_cache[harness]
 
     # =========================================================================
     # Core Chat Functions
@@ -226,16 +232,20 @@ class ClaudeOrchestrator:
         self,
         prompt: str,
         model: str = None,
+        harness: str = None,
+        reasoning_effort: str = None,
         context_files: List[str] = None,
         async_: bool = False,
         system_instruction: str = None
     ) -> Union[str, "asyncio.coroutine"]:
         """
-        Send a prompt to Claude Code.
+        Send a prompt to Claude Code or Codex.
 
         Args:
             prompt: The prompt to send
-            model: Model override (sonnet, opus, haiku)
+            model: Model override (sonnet, opus, haiku for claude; o4-mini etc for codex)
+            harness: 'claude' or 'codex' (defaults to self.default_harness)
+            reasoning_effort: For codex only: 'low', 'medium', 'high'
             context_files: Files to include as context
             async_: If True, returns a coroutine for asyncio.gather()
             system_instruction: Optional system-level instruction prefix
@@ -244,45 +254,40 @@ class ClaudeOrchestrator:
             Response string if async_=False, coroutine if async_=True
         """
         if async_:
-            return self._chat_async(prompt, model, context_files, system_instruction)
+            return self._chat_async(prompt, model, harness, reasoning_effort, context_files, system_instruction)
         else:
-            return self._chat_sync(prompt, model, context_files, system_instruction)
+            return self._chat_sync(prompt, model, harness, reasoning_effort, context_files, system_instruction)
 
     def _chat_sync(
         self,
         prompt: str,
         model: str = None,
+        harness: str = None,
+        reasoning_effort: str = None,
         context_files: List[str] = None,
         system_instruction: str = None
     ) -> str:
         """
         Synchronous chat - blocks until response.
 
-        ARCHITECTURE NOTE:
-        This is the core integration point between AI-OS and Claude Code.
-        Each call runs `claude -p` as a subprocess with --output-format json.
-
-        IMPORTANT:
-        - Each call is stateless (Claude Code starts fresh)
-        - Context must be provided in the prompt
-        - Cost tracking only works with JSON output
-        - CANNOT be tested by running `claude -p` within Claude Code (infinite recursion)
-
-        MAINTENANCE:
-        - If Claude Code CLI changes JSON format, update parsing here
-        - --dangerously-skip-permissions needed for macro automation
-        - Default timeout is 600s, adjust if operations take longer
+        Supports both claude and codex harnesses. Builds the appropriate CLI
+        command and parses output format (JSON for claude, text for codex).
         """
         full_prompt = self._build_prompt(prompt, context_files, system_instruction)
         model = model or self.default_model
+        harness = harness or self.default_harness
 
-        # CRITICAL: Build Claude Code command with JSON output for structured responses
-        # --output-format json enables cost tracking and proper error handling
-        # This is the core integration point between AI-OS and Claude Code CLI
-        cmd = self._claude_cmd + ["-p", "--model", model]
-        if self.skip_permissions:
-            cmd.append("--dangerously-skip-permissions")
-        cmd.extend(["--output-format", "json"])
+        cli_cmd = self._get_cli_cmd(harness)
+
+        if harness == "codex":
+            cmd = cli_cmd + ["exec", "--model", model]
+            if reasoning_effort:
+                cmd.extend(["--reasoning-effort", reasoning_effort])
+        else:  # claude
+            cmd = cli_cmd + ["-p", "--model", model]
+            if self.skip_permissions:
+                cmd.append("--dangerously-skip-permissions")
+            cmd.extend(["--output-format", "json"])
 
         result = subprocess.run(
             cmd,
@@ -294,27 +299,40 @@ class ClaudeOrchestrator:
         )
 
         if result.returncode != 0:
-            raise RuntimeError(f"Claude Code failed: {result.stderr}")
+            raise RuntimeError(f"{harness} failed: {result.stderr}")
 
-        output = json.loads(result.stdout)
-        self._track_cost(output.get("cost", {}))
-        return output.get("result", "")
+        if harness == "codex":
+            return result.stdout
+        else:
+            output = json.loads(result.stdout)
+            self._track_cost(output.get("cost", {}))
+            return output.get("result", "")
 
     async def _chat_async(
         self,
         prompt: str,
         model: str = None,
+        harness: str = None,
+        reasoning_effort: str = None,
         context_files: List[str] = None,
         system_instruction: str = None
     ) -> str:
         """Async chat - returns awaitable for asyncio.gather()."""
         full_prompt = self._build_prompt(prompt, context_files, system_instruction)
         model = model or self.default_model
+        harness = harness or self.default_harness
 
-        cmd = self._claude_cmd + ["-p", "--model", model]
-        if self.skip_permissions:
-            cmd.append("--dangerously-skip-permissions")
-        cmd.extend(["--output-format", "json"])
+        cli_cmd = self._get_cli_cmd(harness)
+
+        if harness == "codex":
+            cmd = cli_cmd + ["exec", "--model", model]
+            if reasoning_effort:
+                cmd.extend(["--reasoning-effort", reasoning_effort])
+        else:  # claude
+            cmd = cli_cmd + ["-p", "--model", model]
+            if self.skip_permissions:
+                cmd.append("--dangerously-skip-permissions")
+            cmd.extend(["--output-format", "json"])
 
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -330,11 +348,14 @@ class ClaudeOrchestrator:
         )
 
         if proc.returncode != 0:
-            raise RuntimeError(f"Claude Code failed: {stderr.decode()}")
+            raise RuntimeError(f"{harness} failed: {stderr.decode()}")
 
-        output = json.loads(stdout.decode())
-        self._track_cost(output.get("cost", {}))
-        return output.get("result", "")
+        if harness == "codex":
+            return stdout.decode()
+        else:
+            output = json.loads(stdout.decode())
+            self._track_cost(output.get("cost", {}))
+            return output.get("result", "")
 
     def chat_streaming(
         self,
@@ -352,7 +373,7 @@ class ClaudeOrchestrator:
         full_prompt = self._build_prompt(prompt, context_files, system_instruction)
         model = model or self.default_model
 
-        cmd = self._claude_cmd + ["-p", "--model", model]
+        cmd = self._get_cli_cmd("claude") + ["-p", "--model", model]
         if self.skip_permissions:
             cmd.append("--dangerously-skip-permissions")
 
@@ -627,6 +648,7 @@ Use the Edit or Write tools as appropriate. Read files first if needed."""
             shell=True,
             capture_output=True,
             text=True,
+            errors='replace',  # Handle binary output gracefully
             cwd=self.working_dir
         )
 
@@ -863,6 +885,7 @@ def reset_orchestrator() -> None:
 def configure_orchestrator(
     working_dir: str = None,
     default_model: str = "sonnet",
+    default_harness: str = "claude",
     timeout: int = 600,
     skip_permissions: bool = True
 ) -> ClaudeOrchestrator:
@@ -871,6 +894,7 @@ def configure_orchestrator(
     _orchestrator = ClaudeOrchestrator(
         working_dir=working_dir,
         default_model=default_model,
+        default_harness=default_harness,
         timeout=timeout,
         skip_permissions=skip_permissions
     )

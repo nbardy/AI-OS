@@ -79,48 +79,34 @@ def log_to_context(msg: str) -> None:
 def chat(
     prompt: str,
     include_context: bool = True,
-    image_path: str = None,
+    images: list = None,
     model: str = None,
+    harness: str = None,
+    reasoning_effort: str = None,
     async_: bool = False
 ) -> Union[str, Coroutine[Any, Any, str]]:
     """
-    Send a prompt to Claude via Claude Code.
-
-    CRITICAL: This is the primary LLM interface for macros. It wraps
-    ClaudeOrchestrator.chat() and handles context file injection automatically.
-
-    The async_ parameter enables PARALLEL LLM calls for 3x+ speedup on multi-task
-    workflows. See examples/tree_of_thought.py for proper usage pattern.
-
-    IMPORTANT: When async_=False (default), this function BLOCKS until response
-    is complete. When async_=True, it returns a coroutine that must be awaited
-    with asyncio.gather() or similar.
+    Send a prompt to Claude or Codex via CLI harness.
 
     Args:
         prompt: The prompt to send
         include_context: If True (default), includes conversation history
-        image_path: Optional path to an image file (for vision)
-        model: Model override (sonnet, opus, haiku)
+        images: List of image paths for Claude to read (for vision)
+        model: Model override (sonnet, opus, haiku for claude; o4-mini etc for codex)
+        harness: 'claude' or 'codex' (defaults to orchestrator's default)
+        reasoning_effort: For codex only: 'low', 'medium', 'high'
         async_: If True, returns a coroutine for use with asyncio.gather()
 
     Returns:
         Response string, or coroutine if async_=True
-
-    Example:
-        # Sync (default) - blocks until complete
-        response = ah.chat("What is 2+2?")
-
-        # Async (for parallel execution) - enables 3x+ speedup
-        results = await asyncio.gather(
-            ah.chat("prompt 1", async_=True),
-            ah.chat("prompt 2", async_=True),
-        )
     """
     return _require_runner().chat(
         prompt,
         include_context=include_context,
-        image_path=image_path,
+        images=images,
         model=model,
+        harness=harness,
+        reasoning_effort=reasoning_effort,
         async_=async_
     )
 

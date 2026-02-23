@@ -40,6 +40,9 @@ _context: Dict[str, Any] = {
     "vars": {},
 }
 
+# Log buffer - accumulated during macro runs, flushed to context after
+_log_buffer: List[str] = []
+
 
 # =========================================================================
 # Configuration
@@ -49,6 +52,7 @@ _context: Dict[str, Any] = {
 def config(
     working_dir: str = None,
     default_model: str = "sonnet",
+    default_harness: str = "claude",
     timeout: int = 600,
     skip_permissions: bool = True,
 ) -> ClaudeOrchestrator:
@@ -57,7 +61,8 @@ def config(
 
     Args:
         working_dir: Working directory for file operations
-        default_model: Default model (haiku, sonnet, opus)
+        default_model: Default model (haiku, sonnet, opus for claude; o4-mini etc for codex)
+        default_harness: Default harness ('claude' or 'codex')
         timeout: Timeout in seconds
         skip_permissions: Skip permission prompts
 
@@ -67,6 +72,7 @@ def config(
     return configure_orchestrator(
         working_dir=working_dir,
         default_model=default_model,
+        default_harness=default_harness,
         timeout=timeout,
         skip_permissions=skip_permissions,
     )
@@ -91,12 +97,24 @@ def _clear_context() -> None:
 
 def log(message: str) -> None:
     """
-    Print a message to the console. Supports Rich markup.
+    Print a message to the console and buffer for context.
 
     Args:
         message: The message to print (supports Rich markup like [bold], [red], etc.)
     """
     _console.print(message)
+    # Strip Rich markup for context (simple regex)
+    import re
+    clean = re.sub(r'\[/?[^\]]+\]', '', message)
+    _log_buffer.append(clean)
+
+
+def flush_logs() -> str:
+    """Flush log buffer and return contents. Call after macro runs."""
+    global _log_buffer
+    content = "\n".join(_log_buffer)
+    _log_buffer = []
+    return content
 
 
 @contextmanager
@@ -182,28 +200,34 @@ def chat(
     context: List[str] = None,
     images: List[str] = None,
     model: str = None,
+    harness: str = None,
+    reasoning_effort: str = None,
     async_: bool = False,
     **kwargs,
 ) -> Union[str, Coroutine[Any, Any, str]]:
     """
-    Send a prompt to Claude and get a text response.
+    Send a prompt to Claude or Codex and get a text response.
 
     Args:
         prompt: The prompt to send
         context: List of file paths to include as context
         images: List of image paths to analyze (vision)
-        model: Model override (haiku, sonnet, opus)
+        model: Model override (haiku, sonnet, opus for claude; o4-mini etc for codex)
+        harness: 'claude' or 'codex' (defaults to orchestrator's default)
+        reasoning_effort: For codex only: 'low', 'medium', 'high'
         async_: If True, returns a coroutine for asyncio.gather()
 
     Returns:
         Response string, or coroutine if async_=True
     """
     orch = get_orchestrator()
-    # If images provided, use vision
+    # If images provided, use vision (claude only)
     if images:
-        # For now, just use the first image
         return orch.vision(prompt, images[0], model=model, async_=async_)
-    return orch.chat(prompt, model=model, context_files=context, async_=async_)
+    return orch.chat(
+        prompt, model=model, harness=harness, reasoning_effort=reasoning_effort,
+        context_files=context, async_=async_
+    )
 
 
 def chat_json(
@@ -546,6 +570,7 @@ __all__ = [
     "_clear_context",
     # Output
     "log",
+    "flush_logs",
     "status",
     # Human interaction
     "approve",

@@ -20,6 +20,7 @@ from rich.prompt import Confirm
 
 from ai_os.core import macro_helpers
 from ai_os.core.orchestrator import ClaudeOrchestrator
+from ai_os.core.dsl import flush_logs
 from ai_os.utils.context import context_manager
 
 
@@ -102,6 +103,11 @@ class MacroRunner:
             self.console.print(traceback.format_exc())
 
         finally:
+            # Flush logs to context as single message
+            logs = flush_logs()
+            if logs.strip():
+                context_manager.add_message(role="system", content=f"[MACRO OUTPUT]\n{logs}")
+
             macro_helpers.set_runner(None)
             self.ctx.clear()
             if macro_path_resolved and Path.cwd() != original_cwd:
@@ -154,6 +160,9 @@ class MacroRunner:
             sys.path.insert(0, parent_dir)
             added_to_path = True
 
+        # Clear cached submodules from this macro's directory to enable hot-reload
+        self._clear_cached_modules(Path(parent_dir).resolve())
+
         try:
             spec = importlib.util.spec_from_file_location(module_name, path)
             if spec and spec.loader:
@@ -166,6 +175,29 @@ class MacroRunner:
         finally:
             if added_to_path and parent_dir in sys.path:
                 sys.path.remove(parent_dir)
+
+    def _clear_cached_modules(self, macro_dir: Path) -> None:
+        """Clear any cached modules that live in the macro's directory tree.
+
+        This enables hot-reload: when a macro is re-run, its submodules
+        (like 'prompts.goal_setter') are reimported from disk.
+        """
+        to_remove = []
+        for name, module in sys.modules.items():
+            if module is None:
+                continue
+            try:
+                module_file = getattr(module, '__file__', None)
+                if module_file:
+                    module_path = Path(module_file).resolve()
+                    # Check if module lives under the macro's directory
+                    if str(module_path).startswith(str(macro_dir)):
+                        to_remove.append(name)
+            except Exception:
+                pass
+
+        for name in to_remove:
+            del sys.modules[name]
 
     # =========================================================================
     # Methods called by macro_helpers
@@ -187,28 +219,56 @@ class MacroRunner:
         self,
         prompt: str,
         include_context: bool = True,
-        image_path: str = None,
+        images: list = None,
         model: str = None,
+        harness: str = None,
+        reasoning_effort: str = None,
         async_: bool = False
     ) -> Union[str, Coroutine[Any, Any, str]]:
-        """Chat with Claude via orchestrator."""
+        """Chat with Claude or Codex via orchestrator.
+
+        Args:
+            prompt: The prompt to send
+            include_context: Whether to include conversation context
+            images: List of image paths for Claude to read
+            model: Model to use (haiku, sonnet, opus for claude; o4-mini etc for codex)
+            harness: 'claude' or 'codex' (defaults to orchestrator's default)
+            reasoning_effort: For codex only: 'low', 'medium', 'high'
+            async_: If True, return coroutine for async execution
+        """
         self.console.print(f"[dim]> {prompt[:80]}{'...' if len(prompt) > 80 else ''}[/dim]")
 
-        # Handle vision requests
-        if image_path and os.path.exists(image_path):
-            full_prompt = f"Read the image at {image_path} and analyze it:\n{prompt}"
+        # Handle vision requests - images is a list of paths
+        if images:
+            valid_paths = [p for p in images if os.path.exists(p)]
+            if valid_paths:
+                image_instructions = "\n".join([f"Read the image at {p}" for p in valid_paths])
+                full_prompt = f"{image_instructions}\n\n{prompt}"
+            else:
+                full_prompt = prompt
         else:
             full_prompt = prompt
 
         if async_:
-            return self.orchestrator.chat(full_prompt, model=model, async_=True)
+            return self.orchestrator.chat(
+                full_prompt, model=model, harness=harness,
+                reasoning_effort=reasoning_effort, async_=True
+            )
 
-        # Sync version with streaming output
-        full_response = ""
-        for chunk in self.orchestrator.chat_streaming(full_prompt, model=model):
-            print(chunk, end="", flush=True)
-            full_response += chunk
-        print()  # Newline after streaming
+        # Sync version: streaming only supported for claude harness
+        resolved_harness = harness or self.orchestrator.default_harness
+        if resolved_harness == "codex":
+            full_response = self.orchestrator.chat(
+                full_prompt, model=model, harness="codex",
+                reasoning_effort=reasoning_effort
+            )
+            print(full_response)
+        else:
+            full_response = ""
+            for chunk in self.orchestrator.chat_streaming(full_prompt, model=model):
+                print(chunk, end="", flush=True)
+                full_response += chunk
+            print()  # Newline after streaming
 
         # Add to context
         context_manager.add_message(role="user", content=prompt)
